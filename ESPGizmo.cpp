@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 
 #define WIFI_DATA   "cfg/wifi"
@@ -39,13 +40,14 @@ ESP8266WebServer *ESPGizmo::httpServer() {
     return server;
 }
 
-void ESPGizmo::beginSetup(char *_name, char *_passkey) {
+void ESPGizmo::beginSetup(char *_name, char *_version, char *_passkey) {
     Serial.begin(115200);
-    Serial.println();
     SPIFFS.begin();
 
     strncpy(name, _name, MAX_NAME_SIZE - 1);
+    strncpy(version, _version, MAX_VERSION_SIZE - 1);
     strncpy(passkeyLocal, _passkey, MAX_PASSKEY_SIZE - 1);
+    Serial.printf("\n\n%s version %s\n\n", name, version);
 
     setupWiFi();
     setupOTA();
@@ -153,6 +155,24 @@ void ESPGizmo::setupOTA() {
     });
 }
 
+int ESPGizmo::updateSoftware(char *url, char *version) {
+    Serial.printf("Updating software from %s; current version %s\n", url, version);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
+    switch(ret) {
+        case HTTP_UPDATE_FAILED:
+            Serial.println("Software update failed.");
+            return -1;
+        case HTTP_UPDATE_NO_UPDATES:
+            Serial.println("Software update not required.");
+            return 0;
+        case HTTP_UPDATE_OK:
+            // may not be called due to race with reboot
+            Serial.println("Software updated!");
+            return 1;
+    }
+    return 0;
+}
+
 bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     if (WiFi.status() == WL_CONNECTED) {
         if (disconnected) {
@@ -213,4 +233,3 @@ void ESPGizmo::saveNetworkConfig() {
         f.close();
     }
 }
-

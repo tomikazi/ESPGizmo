@@ -3,6 +3,7 @@
 #include <ESP8266WebServer.h>
 
 #define MAX_NAME_SIZE       16
+#define MAX_VERSION_SIZE    16
 #define MAX_SSID_SIZE       32
 #define MAX_PASSKEY_SIZE    32
 
@@ -14,7 +15,7 @@ class ESPGizmo {
 public:
     ESPGizmo();
 
-    void beginSetup(char *name, char *passkey);
+    void beginSetup(char *name, char *version, char *passkey);
     void endSetup();
 
     const char *getName();
@@ -25,8 +26,11 @@ public:
 
     bool isNetworkAvailable(void (*afterConnection)());
 
+    int updateSoftware(char *url, char *version);
+
 private:
     char name[MAX_NAME_SIZE];
+    char version[MAX_VERSION_SIZE];
 
     char hostname[MAX_SSID_SIZE];
     char passkeyLocal[MAX_PASSKEY_SIZE];
