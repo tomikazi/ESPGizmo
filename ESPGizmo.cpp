@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
+#include <ArduinoOTA.h>
 
 #define WIFI_DATA   "cfg/wifi"
 #define MQTT_DATA   "cfg/mqtt"
@@ -13,7 +14,7 @@
 #define WIFI_CHANNEL        6
 #define MAX_CONNECTIONS     2
 
-#define MAX_HTML    4096
+#define MAX_HTML    2048
 static char html[MAX_HTML];
 
 static boolean disconnected = true;
@@ -26,8 +27,8 @@ const char *ESPGizmo::getName() {
     return name;
 }
 
-const char *ESPGizmo::getLocalSSID() {
-    return ssidLocal;
+const char *ESPGizmo::getHostname() {
+    return hostname;
 }
 
 const char *ESPGizmo::getSSID() {
@@ -41,17 +42,13 @@ ESP8266WebServer *ESPGizmo::httpServer() {
 void ESPGizmo::beginSetup(char *_name, char *_passkey) {
     Serial.begin(115200);
     Serial.println();
+    SPIFFS.begin();
 
     strncpy(name, _name, MAX_NAME_SIZE - 1);
     strncpy(passkeyLocal, _passkey, MAX_PASSKEY_SIZE - 1);
 
-    uint8_t macAddr[6];
-    WiFi.softAPmacAddress(macAddr);
-    sprintf(ssidLocal, "%s-%02X%02X%02X", name, macAddr[3], macAddr[4], macAddr[5]);
-
-    SPIFFS.begin();
-
     setupWiFi();
+    setupOTA();
     setupHTTPServer();
 }
 
@@ -75,11 +72,13 @@ void ESPGizmo::handleNetworkScan() {
         strcat(nets, WiFi.SSID(i).c_str());
         strcat(nets, "</option>");
     }
-    snprintf(html, MAX_HTML, NET_HTML, nets, ssid, passkey);
+    snprintf(html, MAX_HTML, NET_HTML, hostname, nets, ssid, passkey,
+             disconnected ? "not connected" : WiFi.localIP().toString().c_str());
     server->send(200, "text/html", html);
 }
 
 void ESPGizmo::handleNetworkConfig() {
+    strncpy(hostname, server->arg("name").c_str(), MAX_SSID_SIZE - 1);
     strncpy(ssid, server->arg("net").c_str(), MAX_SSID_SIZE - 1);
     strncpy(passkey, server->arg("pwd").c_str(), MAX_PASSKEY_SIZE - 1);
     Serial.printf("Reconfiguring for connection to %s\n", ssid);
@@ -88,6 +87,7 @@ void ESPGizmo::handleNetworkConfig() {
     server->send(200, "text/html", html);
 
     saveNetworkConfig();
+    WiFi.disconnect(true);
     restartTime = millis() + 1000;
 }
 
@@ -97,6 +97,8 @@ void ESPGizmo::restart() {
 }
 
 void ESPGizmo::setupWiFi() {
+    WiFi.hostname(hostname);
+
     loadNetworkConfig();
     if (strlen(ssid)) {
         Serial.printf("Attempting connection to %s\n", ssid);
@@ -105,19 +107,50 @@ void ESPGizmo::setupWiFi() {
         Serial.printf("No WiFi connection configured\n", ssid);
     }
 
-    apIP = new IPAddress(10, 10, 10, 1);
-    netMask = new IPAddress(255, 255, 255, 0);
+    if (strlen(hostname) < 2) {
+        uint8_t macAddr[6];
+        WiFi.softAPmacAddress(macAddr);
+        sprintf(hostname, "%s-%02X%02X%02X", name, macAddr[3], macAddr[4], macAddr[5]);
+    }
+
+    Serial.printf("Hostname: %s\n", hostname);
 
     WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP(ssidLocal, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
-    WiFi.softAPConfig(*apIP, *apIP, *netMask);
-    Serial.printf("WiFi %s started\n", ssidLocal);
+    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
+
+    IPAddress apIP = IPAddress(10, 10, 10, 1);
+    IPAddress netMask = IPAddress(255, 255, 255, 0);
+    WiFi.softAPConfig(apIP, apIP, netMask);
+
+    Serial.printf("WiFi %s started\n", hostname);
+    delay(100);
 }
 
 void ESPGizmo::setupHTTPServer() {
     server = new ESP8266WebServer(80);
     server->on("/nets", std::bind(&ESPGizmo::handleNetworkScan, this));
     server->on("/netcfg", std::bind(&ESPGizmo::handleNetworkConfig, this));
+}
+
+void ESPGizmo::setupOTA() {
+    ArduinoOTA.setHostname(hostname);
+    ArduinoOTA.onStart([]() {
+        Serial.println("OTA Started");
+    });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+        else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
 }
 
 bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
@@ -127,13 +160,11 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             if (afterConnection) {
                 afterConnection();
             }
-
-            // ArduinoOTA.begin();
-
-            // Add service to MDNS-SD
+            ArduinoOTA.begin();
             MDNS.addService("http", "tcp", 80);
         }
     }
+    ArduinoOTA.handle();
     server->handleClient();
 
     if (restartTime && restartTime < millis()) {
@@ -142,14 +173,35 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     return !disconnected;
 }
 
+char *trimwhitespace(char *str) {
+    char *end;
+
+    // Trim leading space
+    while(isspace((unsigned char)*str)) str++;
+
+    if(*str == 0)  // All spaces?
+        return str;
+
+    // Trim trailing space
+    end = str + strlen(str) - 1;
+    while(end > str && isspace((unsigned char)*end)) end--;
+
+    // Write new null terminator character
+    end[1] = '\0';
+
+    return str;
+}
 
 void ESPGizmo::loadNetworkConfig() {
     File f = SPIFFS.open(WIFI_DATA, "r");
     if (f) {
-        int l = f.readBytesUntil('|', ssid, MAX_SSID_SIZE);
+        int l = f.readBytesUntil('|', ssid, MAX_SSID_SIZE - 1);
         ssid[l] = NULL;
-        l = f.readBytesUntil('|', passkey, MAX_PASSKEY_SIZE);
+        l = f.readBytesUntil('|', passkey, MAX_PASSKEY_SIZE - 1);
         passkey[l] = NULL;
+        l = f.readBytesUntil('|', hostname, MAX_SSID_SIZE - 1);
+        hostname[l] = NULL;
+        trimwhitespace(hostname);
         f.close();
     }
 }
@@ -157,7 +209,8 @@ void ESPGizmo::loadNetworkConfig() {
 void ESPGizmo::saveNetworkConfig() {
     File f = SPIFFS.open(WIFI_DATA, "w");
     if (f) {
-        f.printf("%s|%s|\n", ssid, passkey);
+        f.printf("%s|%s|%s|\n", ssid, passkey, hostname);
         f.close();
     }
 }
+

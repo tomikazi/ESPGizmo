@@ -18,7 +18,7 @@ public:
     void endSetup();
 
     const char *getName();
-    const char *getLocalSSID();
+    const char *getHostname();
     const char *getSSID();
 
     ESP8266WebServer *httpServer();
@@ -28,7 +28,7 @@ public:
 private:
     char name[MAX_NAME_SIZE];
 
-    char ssidLocal[MAX_SSID_SIZE];
+    char hostname[MAX_SSID_SIZE];
     char passkeyLocal[MAX_PASSKEY_SIZE];
 
     char ssid[MAX_SSID_SIZE];
@@ -43,6 +43,7 @@ private:
     ESP8266WebServer *server;
 
     void setupWiFi();
+    void setupOTA();
     void setupHTTPServer();
 
     void loadNetworkConfig();
