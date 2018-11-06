@@ -4,7 +4,6 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
-#include <ESP8266WebServer.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 
@@ -18,8 +17,18 @@
 #define MAX_HTML    2048
 static char html[MAX_HTML];
 
+#define MQTT_RECONNECT_FREQUENCY    5000
+
+#define MAX_TOPIC_SIZE  64
+#define MAX_TOPIC_COUNT 16
+static char topics[MAX_TOPIC_COUNT][MAX_TOPIC_SIZE];
+static int topicCount = 0;
+
+static boolean callAfterConnection = false;
 static boolean disconnected = true;
-static uint32_t restartTime;
+static boolean mqttConfigured = false;
+static uint32_t lastReconnectAttempt = 0;
+static uint32_t restartTime = 0;
 
 ESPGizmo::ESPGizmo() {
 }
@@ -40,9 +49,77 @@ ESP8266WebServer *ESPGizmo::httpServer() {
     return server;
 }
 
-void ESPGizmo::beginSetup(char *_name, char *_version, char *_passkey) {
+void ESPGizmo::initToSaneValues() {
+    ssid[0] = NULL;
+    passkey[0] = NULL;
+    mqttHost[0] = NULL;
+    mqttUser[0] = NULL;
+    mqttPass[0] = NULL;
+}
+
+void ESPGizmo::setCallback(void (*callback)(char*, uint8_t*, unsigned int)) {
+    mqttCallback = callback;
+}
+
+void replaceSubstring(char *string,char *sub,char *rep) {
+    int stringLen, subLen, newLen;
+    int i = 0, j, k;
+    int flag = 0, start, end;
+    stringLen = strlen(string);
+    subLen = strlen(sub);
+    newLen = strlen(rep);
+
+    for (i = 0; i < stringLen; i++) {
+        flag = 0;
+        start = i;
+        for (j = 0; string[i] == sub[j]; j++, i++) /* Checks for the substring */
+            if (j == subLen - 1)
+                flag = 1;
+        end = i;
+        if (flag == 0)
+            i -= j;
+        else {
+            for (j = start; j < end; j++) {
+                for (k = start; k < stringLen; k++)
+                    string[k] = string[k + 1];
+                stringLen--;
+                i--;
+            }
+
+            for (j = start; j < start + newLen; j++) {
+                for (k = stringLen; k >= j; k--)
+                    string[k + 1] = string[k];
+                string[j] = rep[j - start];
+                stringLen++;
+                i++;
+            }
+        }
+    }
+}
+
+void ESPGizmo::addTopic(const char *topic) {
+    if (topicCount < MAX_TOPIC_COUNT) {
+        strncpy(topics[topicCount], topic, MAX_TOPIC_SIZE - 1);
+        replaceSubstring(topics[topicCount], "%s", hostname);
+        topicCount = topicCount + 1;
+    }
+}
+
+void ESPGizmo::publish(char *topic, char *payload) {
+    publish(topic, payload, false);
+}
+
+void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
+    if (mqttConfigured && mqtt) {
+        mqtt->publish(topic, payload, retain);
+    }
+}
+
+void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
     Serial.begin(115200);
     SPIFFS.begin();
+
+    initToSaneValues();
 
     strncpy(name, _name, MAX_NAME_SIZE - 1);
     strncpy(version, _version, MAX_VERSION_SIZE - 1);
@@ -50,6 +127,7 @@ void ESPGizmo::beginSetup(char *_name, char *_version, char *_passkey) {
     Serial.printf("\n\n%s version %s\n\n", name, version);
 
     setupWiFi();
+    setupMQTT();
     setupOTA();
     setupHTTPServer();
 }
@@ -59,7 +137,7 @@ void ESPGizmo::endSetup() {
     Serial.println("HTTP server started");
 }
 
-void ESPGizmo::handleNetworkScan() {
+void ESPGizmo::handleNetworkScanPage() {
     char nets[MAX_HTML/2];
     int n = WiFi.scanNetworks();
     nets[0] = NULL;
@@ -82,7 +160,7 @@ void ESPGizmo::handleNetworkScan() {
 void ESPGizmo::handleNetworkConfig() {
     strncpy(hostname, server->arg("name").c_str(), MAX_SSID_SIZE - 1);
     strncpy(ssid, server->arg("net").c_str(), MAX_SSID_SIZE - 1);
-    strncpy(passkey, server->arg("pwd").c_str(), MAX_PASSKEY_SIZE - 1);
+    strncpy(passkey, server->arg("pass").c_str(), MAX_PASSKEY_SIZE - 1);
     Serial.printf("Reconfiguring for connection to %s\n", ssid);
 
     snprintf(html, MAX_HTML, NETCFG_HTML, ssid);
@@ -90,6 +168,28 @@ void ESPGizmo::handleNetworkConfig() {
 
     saveNetworkConfig();
     WiFi.disconnect(true);
+    restartTime = millis() + 1000;
+}
+
+void ESPGizmo::handleMQTTPage() {
+    char nets[MAX_HTML/2];
+    snprintf(html, MAX_HTML, MQTT_HTML, mqttHost, mqttPort, mqttUser, mqttPass);
+    server->send(200, "text/html", html);
+}
+
+void ESPGizmo::handleMQTTConfig() {
+    char port[8];
+    strncpy(mqttHost, server->arg("host").c_str(), MAX_MQTT_HOST_SIZE - 1);
+    strncpy(port, server->arg("port").c_str(), 7);
+    mqttPort = atoi(port);
+    strncpy(mqttUser, server->arg("user").c_str(), MAX_MQTT_USER_SIZE - 1);
+    strncpy(mqttPass, server->arg("pass").c_str(), MAX_MQTT_PASS_SIZE - 1);
+    Serial.printf("Reconfiguring for connection to %s\n", mqttHost);
+
+    snprintf(html, MAX_HTML, MQTTCFG_HTML, mqttHost);
+    server->send(200, "text/html", html);
+
+    saveMQTTConfig();
     restartTime = millis() + 1000;
 }
 
@@ -106,12 +206,11 @@ void ESPGizmo::setupWiFi() {
         Serial.printf("Attempting connection to %s\n", ssid);
         WiFi.begin(ssid, passkey);
     } else {
-        Serial.printf("No WiFi connection configured\n", ssid);
+        Serial.printf("No WiFi connection configured\n");
     }
 
+    WiFi.softAPmacAddress(macAddr);
     if (strlen(hostname) < 2) {
-        uint8_t macAddr[6];
-        WiFi.softAPmacAddress(macAddr);
         sprintf(hostname, "%s-%02X%02X%02X", name, macAddr[3], macAddr[4], macAddr[5]);
     }
 
@@ -128,10 +227,22 @@ void ESPGizmo::setupWiFi() {
     delay(100);
 }
 
+void ESPGizmo::setupMQTT() {
+    loadMQTTConfig();
+    if (strlen(mqttHost)) {
+        Serial.printf("Attempting connection to MQTT server %s\n", mqttHost);
+        mqttConfigured = true;
+    } else {
+        Serial.printf("No MQTT server configured\n");
+    }
+}
+
 void ESPGizmo::setupHTTPServer() {
     server = new ESP8266WebServer(80);
-    server->on("/nets", std::bind(&ESPGizmo::handleNetworkScan, this));
+    server->on("/nets", std::bind(&ESPGizmo::handleNetworkScanPage, this));
     server->on("/netcfg", std::bind(&ESPGizmo::handleNetworkConfig, this));
+    server->on("/mqtt", std::bind(&ESPGizmo::handleMQTTPage, this));
+    server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
 }
 
 void ESPGizmo::setupOTA() {
@@ -155,7 +266,7 @@ void ESPGizmo::setupOTA() {
     });
 }
 
-int ESPGizmo::updateSoftware(char *url, char *version) {
+int ESPGizmo::updateSoftware(const char *url, const char *version) {
     Serial.printf("Updating software from %s; current version %s\n", url, version);
     t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
     switch(ret) {
@@ -173,15 +284,54 @@ int ESPGizmo::updateSoftware(char *url, char *version) {
     return 0;
 }
 
+boolean ESPGizmo::mqttReconnect() {
+    Serial.printf("Attempting connection to MQTT server %s as %s/%s\n",
+            mqttHost, mqttUser, mqttPass);
+    if (mqtt->connect(hostname, mqttUser, mqttPass)) {
+        // Once connected, publish an announcement...
+        mqtt->publish("gizmo/started", hostname);
+        for (int i = 0; i < topicCount; i++) {
+            mqtt->subscribe(topics[i]);
+        }
+    }
+    return mqtt->connected();
+}
+
 bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
-    if (WiFi.status() == WL_CONNECTED) {
+    boolean wifiReady = WiFi.status() == WL_CONNECTED;
+    boolean mqttReady = (mqttConfigured && mqtt && mqtt->connected()) || !mqttConfigured;
+
+    if (wifiReady) {
         if (disconnected) {
             disconnected = false;
-            if (afterConnection) {
-                afterConnection();
-            }
+            callAfterConnection = true;
+            Serial.printf("Connected to %s with IP ", ssid);
+            Serial.println(WiFi.localIP());
+
+            mqtt = new PubSubClient(mqttHost, mqttPort, wifiClient);
+            mqtt->setCallback(mqttCallback);
+
             ArduinoOTA.begin();
             MDNS.addService("http", "tcp", 80);
+        }
+
+        if (mqtt && mqttConfigured) {
+            if (!mqtt->connected()) {
+                uint32_t now = millis();
+                if (now - lastReconnectAttempt > MQTT_RECONNECT_FREQUENCY) {
+                    lastReconnectAttempt = now;
+                    if (mqttReconnect()) {
+                        lastReconnectAttempt = 0;
+                    }
+                }
+            } else {
+                mqtt->loop();
+            }
+        }
+
+        if (callAfterConnection && mqttReady && afterConnection) {
+            callAfterConnection = false;
+            afterConnection();
         }
     }
     ArduinoOTA.handle();
@@ -190,7 +340,12 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     if (restartTime && restartTime < millis()) {
         restart();
     }
-    return !disconnected;
+
+    if (!wifiReady) {
+        disconnected = true;
+    }
+
+    return wifiReady && mqttReady;
 }
 
 char *trimwhitespace(char *str) {
@@ -230,6 +385,36 @@ void ESPGizmo::saveNetworkConfig() {
     File f = SPIFFS.open(WIFI_DATA, "w");
     if (f) {
         f.printf("%s|%s|%s|\n", ssid, passkey, hostname);
+        f.close();
+    }
+}
+
+void ESPGizmo::setMQTTLastWill(const char* willTopic, const char* willMessage,
+                               uint8_t willQos, bool willRetain) {
+
+}
+
+void ESPGizmo::loadMQTTConfig() {
+    File f = SPIFFS.open(MQTT_DATA, "r");
+    if (f) {
+        int l = f.readBytesUntil('|', mqttHost, MAX_MQTT_HOST_SIZE - 1);
+        char port[8];
+        mqttHost[l] = NULL;
+        l = f.readBytesUntil('|', port, 7);
+        port[l] = NULL;
+        mqttPort = atoi(port);
+        l = f.readBytesUntil('|', mqttUser, MAX_MQTT_USER_SIZE - 1);
+        mqttUser[l] = NULL;
+        l = f.readBytesUntil('|', mqttPass, MAX_MQTT_PASS_SIZE - 1);
+        mqttPass[l] = NULL;
+        f.close();
+    }
+}
+
+void ESPGizmo::saveMQTTConfig() {
+    File f = SPIFFS.open(MQTT_DATA, "w");
+    if (f) {
+        f.printf("%s|%d|%s|%s|\n", mqttHost, mqttPort, mqttUser, mqttPass);
         f.close();
     }
 }
