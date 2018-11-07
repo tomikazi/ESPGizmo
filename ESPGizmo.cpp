@@ -29,6 +29,7 @@ static boolean disconnected = true;
 static boolean mqttConfigured = false;
 static uint32_t lastReconnectAttempt = 0;
 static uint32_t restartTime = 0;
+static uint32_t updateTime = 0;
 
 ESPGizmo::ESPGizmo() {
 }
@@ -98,9 +99,13 @@ void replaceSubstring(char *string,char *sub,char *rep) {
 }
 
 void ESPGizmo::addTopic(const char *topic) {
+    addTopic(topic, hostname);
+}
+
+void ESPGizmo::addTopic(const char *topic, const char *uniqueName) {
     if (topicCount < MAX_TOPIC_COUNT) {
         strncpy(topics[topicCount], topic, MAX_TOPIC_SIZE - 1);
-        replaceSubstring(topics[topicCount], "%s", hostname);
+        replaceSubstring(topics[topicCount], "%s", (char *) uniqueName);
         topicCount = topicCount + 1;
     }
 }
@@ -193,6 +198,14 @@ void ESPGizmo::handleMQTTConfig() {
     restartTime = millis() + 1000;
 }
 
+void ESPGizmo::handleUpdate() {
+    Serial.printf("Scheduling update\n");
+
+    snprintf(html, MAX_HTML, UPDATE_HTML, updateUrl, version);
+    server->send(200, "text/html", html);
+    updateTime = millis() + 1000;
+}
+
 void ESPGizmo::restart() {
     Serial.println("Restarting...");
     ESP.restart();
@@ -245,6 +258,13 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
 }
 
+void ESPGizmo::setUpdateURL(const char *url) {
+    updateUrl = (char *) url;
+    if (strlen(updateUrl)) {
+        server->on("/update", std::bind(&ESPGizmo::handleUpdate, this));
+    }
+}
+
 void ESPGizmo::setupOTA() {
     ArduinoOTA.setHostname(hostname);
     ArduinoOTA.onStart([]() {
@@ -266,7 +286,7 @@ void ESPGizmo::setupOTA() {
     });
 }
 
-int ESPGizmo::updateSoftware(const char *url, const char *version) {
+int ESPGizmo::updateSoftware(const char *url) {
     Serial.printf("Updating software from %s; current version %s\n", url, version);
     t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
     switch(ret) {
@@ -336,6 +356,11 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     }
     ArduinoOTA.handle();
     server->handleClient();
+
+    if (updateTime && updateTime < millis()) {
+        updateSoftware(updateUrl);
+        updateTime = 0;
+    }
 
     if (restartTime && restartTime < millis()) {
         restart();

@@ -82,3 +82,19 @@
     Reconfigured for connection to %s. Restarting...\
 </body>\
 </html>"
+
+#define UPDATE_HTML \
+"<!DOCTYPE html>\
+<html lang=\"en\">\
+<head>\
+    <meta http-equiv=\"refresh\" content=\"5;url=/\">\
+    <title>Update Requested</title>\
+    <style>\
+        body {margin:10px;padding:10px;color:#000000;background-color:#ffffff;font-family:Arial,Helvetica,Sans-Serif;font-size:1.4em;}\
+        h1 {color:#AA0000;margin-top:4px;width:100%;}\
+    </style>\
+</head>\
+<body><h1>Updated Requested</h1>\
+    Scheduled update from URL %s; current version is %s.\
+</body>\
+</html>"

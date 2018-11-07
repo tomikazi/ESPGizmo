@@ -26,15 +26,18 @@ public:
 
     void setCallback(void (*callback)(char*, uint8_t*, unsigned int));
     void addTopic(const char *topic);
+    void addTopic(const char *topic, const char *uniqueName);
     void publish(char *topic, char *payload);
     void publish(char *topic, char *payload, boolean retain);
 
     ESP8266WebServer *httpServer();
+    void setUpdateURL(const char *url);
 
     bool isNetworkAvailable(void (*afterConnection)());
 
-    int updateSoftware(const char *url, const char *version);
+    int updateSoftware(const char *url);
 
+    // Not implemented yet
     void setMQTTLastWill(const char* willTopic, const char* willMessage,
                          uint8_t willQos, bool willRetain);
 
@@ -64,6 +67,8 @@ private:
     PubSubClient *mqtt;
     ESP8266WebServer *server;
 
+    char *updateUrl = NULL;
+
     void setupWiFi();
     void setupMQTT();
     void setupOTA();
@@ -79,6 +84,7 @@ private:
     void handleNetworkConfig();
     void handleMQTTPage();
     void handleMQTTConfig();
+    void handleUpdate();
 
     void restart();
     boolean mqttReconnect();
