@@ -62,7 +62,7 @@
     <h3>MQTT Port</h3><input type=\"text\" name=\"port\" value=\"%d\" size=\"30\"><p>\
     <h3>User Name</h3><input type=\"password\" name=\"user\" value=\"%s\" size=\"30\"><p>\
     <h3>Password</h3><input type=\"password\" name=\"pass\" value=\"%s\" size=\"30\"><p>\
-    <h3>Topic Prefix</h3><input type=\"text\" name=\"prefix\" value=\"%s\" size=\"30\">\
+    <h3>Topic Prefix</h3><input type=\"text\" name=\"prefix\" value=\"%s\" size=\"30\"><p>\
     <input type=\"submit\" value=\"Apply Changes\">\
 </form>\
 </body>\

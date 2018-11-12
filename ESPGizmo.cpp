@@ -320,7 +320,9 @@ boolean ESPGizmo::mqttReconnect() {
             mqttHost, mqttUser, mqttPass);
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
         // Once connected, publish an announcement...
-        mqtt->publish("gizmo/started", hostname);
+        char message[64];
+        snprintf(message, 64, "%s (%s)", hostname, version);
+        mqtt->publish("gizmo/started", message);
         for (int i = 0; i < topicCount; i++) {
             mqtt->subscribe(topics[i]);
         }
