@@ -147,7 +147,13 @@ void ESPGizmo::endSetup() {
 }
 
 void ESPGizmo::scheduleRestart() {
+    Serial.printf("Scheduling restart\n");
     restartTime = millis() + 1000;
+}
+
+void ESPGizmo::scheduleUpdate() {
+    Serial.printf("Scheduling update\n");
+    updateTime = millis() + 1000;
 }
 
 
@@ -209,11 +215,9 @@ void ESPGizmo::handleMQTTConfig() {
 }
 
 void ESPGizmo::handleUpdate() {
-    Serial.printf("Scheduling update\n");
-
     snprintf(html, MAX_HTML, UPDATE_HTML, updateUrl, version);
     server->send(200, "text/html", html);
-    updateTime = millis() + 1000;
+    scheduleUpdate();
 }
 
 void ESPGizmo::restart() {

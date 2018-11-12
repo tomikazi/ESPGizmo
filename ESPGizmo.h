@@ -37,6 +37,7 @@ public:
     bool isNetworkAvailable(void (*afterConnection)());
 
     void scheduleRestart();
+    void scheduleUpdate();
 
     int updateSoftware(const char *url);
 
