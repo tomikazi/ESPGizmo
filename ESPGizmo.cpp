@@ -46,6 +46,10 @@ const char *ESPGizmo::getSSID() {
     return ssid;
 }
 
+const char *ESPGizmo::getTopicPrefix() {
+    return topicPrefix;
+}
+
 ESP8266WebServer *ESPGizmo::httpServer() {
     return server;
 }
@@ -99,7 +103,7 @@ void replaceSubstring(char *string,char *sub,char *rep) {
 }
 
 void ESPGizmo::addTopic(const char *topic) {
-    addTopic(topic, hostname);
+    addTopic(topic, strlen(topicPrefix) ? topicPrefix : hostname);
 }
 
 void ESPGizmo::addTopic(const char *topic, const char *uniqueName) {
@@ -142,6 +146,11 @@ void ESPGizmo::endSetup() {
     Serial.println("HTTP server started");
 }
 
+void ESPGizmo::scheduleRestart() {
+    restartTime = millis() + 1000;
+}
+
+
 void ESPGizmo::handleNetworkScanPage() {
     char nets[MAX_HTML/2];
     int n = WiFi.scanNetworks();
@@ -173,12 +182,12 @@ void ESPGizmo::handleNetworkConfig() {
 
     saveNetworkConfig();
     WiFi.disconnect(true);
-    restartTime = millis() + 1000;
+    scheduleRestart();
 }
 
 void ESPGizmo::handleMQTTPage() {
     char nets[MAX_HTML/2];
-    snprintf(html, MAX_HTML, MQTT_HTML, mqttHost, mqttPort, mqttUser, mqttPass);
+    snprintf(html, MAX_HTML, MQTT_HTML, mqttHost, mqttPort, mqttUser, mqttPass, topicPrefix);
     server->send(200, "text/html", html);
 }
 
@@ -189,13 +198,14 @@ void ESPGizmo::handleMQTTConfig() {
     mqttPort = atoi(port);
     strncpy(mqttUser, server->arg("user").c_str(), MAX_MQTT_USER_SIZE - 1);
     strncpy(mqttPass, server->arg("pass").c_str(), MAX_MQTT_PASS_SIZE - 1);
+    strncpy(topicPrefix, server->arg("prefix").c_str(), MAX_SSID_SIZE - 1);
     Serial.printf("Reconfiguring for connection to %s\n", mqttHost);
 
     snprintf(html, MAX_HTML, MQTTCFG_HTML, mqttHost);
     server->send(200, "text/html", html);
 
     saveMQTTConfig();
-    restartTime = millis() + 1000;
+    scheduleRestart();
 }
 
 void ESPGizmo::handleUpdate() {
@@ -223,8 +233,9 @@ void ESPGizmo::setupWiFi() {
     }
 
     WiFi.softAPmacAddress(macAddr);
+    sprintf(defaultHostname, "%s-%02X%02X%02X", name, macAddr[3], macAddr[4], macAddr[5]);
     if (strlen(hostname) < 2) {
-        sprintf(hostname, "%s-%02X%02X%02X", name, macAddr[3], macAddr[4], macAddr[5]);
+        strcpy(hostname, defaultHostname);
     }
 
     Serial.printf("Hostname: %s\n", hostname);
@@ -287,7 +298,7 @@ void ESPGizmo::setupOTA() {
 }
 
 int ESPGizmo::updateSoftware(const char *url) {
-    Serial.printf("Updating software from %s; current version %s\n", url, version);
+    Serial.printf("Updating software from %s ; current version %s\n", url, version);
     t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
     switch(ret) {
         case HTTP_UPDATE_FAILED:
@@ -307,7 +318,7 @@ int ESPGizmo::updateSoftware(const char *url) {
 boolean ESPGizmo::mqttReconnect() {
     Serial.printf("Attempting connection to MQTT server %s as %s/%s\n",
             mqttHost, mqttUser, mqttPass);
-    if (mqtt->connect(hostname, mqttUser, mqttPass)) {
+    if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
         // Once connected, publish an announcement...
         mqtt->publish("gizmo/started", hostname);
         for (int i = 0; i < topicCount; i++) {
@@ -373,7 +384,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     return wifiReady && mqttReady;
 }
 
-char *trimwhitespace(char *str) {
+char *trimWhiteSpace(char *str) {
     char *end;
 
     // Trim leading space
@@ -401,7 +412,7 @@ void ESPGizmo::loadNetworkConfig() {
         passkey[l] = NULL;
         l = f.readBytesUntil('|', hostname, MAX_SSID_SIZE - 1);
         hostname[l] = NULL;
-        trimwhitespace(hostname);
+        trimWhiteSpace(hostname);
         f.close();
     }
 }
@@ -432,6 +443,8 @@ void ESPGizmo::loadMQTTConfig() {
         mqttUser[l] = NULL;
         l = f.readBytesUntil('|', mqttPass, MAX_MQTT_PASS_SIZE - 1);
         mqttPass[l] = NULL;
+        l = f.readBytesUntil('|', topicPrefix, MAX_SSID_SIZE - 1);
+        topicPrefix[l] = NULL;
         f.close();
     }
 }
@@ -439,7 +452,7 @@ void ESPGizmo::loadMQTTConfig() {
 void ESPGizmo::saveMQTTConfig() {
     File f = SPIFFS.open(MQTT_DATA, "w");
     if (f) {
-        f.printf("%s|%d|%s|%s|\n", mqttHost, mqttPort, mqttUser, mqttPass);
+        f.printf("%s|%d|%s|%s|%s|\n", mqttHost, mqttPort, mqttUser, mqttPass, topicPrefix);
         f.close();
     }
 }

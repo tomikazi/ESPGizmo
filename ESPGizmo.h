@@ -22,6 +22,7 @@ public:
 
     const char *getName();
     const char *getHostname();
+    const char *getTopicPrefix();
     const char *getSSID();
 
     void setCallback(void (*callback)(char*, uint8_t*, unsigned int));
@@ -35,6 +36,8 @@ public:
 
     bool isNetworkAvailable(void (*afterConnection)());
 
+    void scheduleRestart();
+
     int updateSoftware(const char *url);
 
     // Not implemented yet
@@ -47,6 +50,7 @@ private:
     char name[MAX_NAME_SIZE];
     char version[MAX_VERSION_SIZE];
 
+    char defaultHostname[MAX_SSID_SIZE];
     char hostname[MAX_SSID_SIZE];
     char passkeyLocal[MAX_PASSKEY_SIZE];
 
@@ -58,6 +62,7 @@ private:
     char mqttPass[MAX_MQTT_PASS_SIZE];
     int mqttPort = 1883;
     void (*mqttCallback)(char*, uint8_t*, unsigned int);
+    char topicPrefix[MAX_SSID_SIZE];
 
     char *willTopic, *willMessage;
     uint8_t willQos;
