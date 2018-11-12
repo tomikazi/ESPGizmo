@@ -47,7 +47,7 @@ const char *ESPGizmo::getSSID() {
 }
 
 const char *ESPGizmo::getTopicPrefix() {
-    return topicPrefix;
+    return topicPrefix[0] != NULL ? topicPrefix : hostname;
 }
 
 ESP8266WebServer *ESPGizmo::httpServer() {
@@ -103,7 +103,7 @@ void replaceSubstring(char *string,char *sub,char *rep) {
 }
 
 void ESPGizmo::addTopic(const char *topic) {
-    addTopic(topic, strlen(topicPrefix) ? topicPrefix : hostname);
+    addTopic(topic, getTopicPrefix());
 }
 
 void ESPGizmo::addTopic(const char *topic, const char *uniqueName) {
