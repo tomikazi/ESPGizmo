@@ -14,6 +14,9 @@
 #define WIFI_CHANNEL        6
 #define MAX_CONNECTIONS     2
 
+#define GIZMO_CONSOLE_TOPIC   "gizmo/console"
+#define GIZMO_CONTROL_TOPIC  "gizmo/control"
+
 #define MAX_HTML    2048
 static char html[MAX_HTML];
 
@@ -30,6 +33,13 @@ static boolean mqttConfigured = false;
 static uint32_t lastReconnectAttempt = 0;
 static uint32_t restartTime = 0;
 static uint32_t updateTime = 0;
+
+static char *scheduledTopic = NULL;
+static char *scheduledPayload = NULL;
+static boolean scheduledRetain = false;
+
+#define MAX_ANNOUNCE_MESSAGE_SIZE   64
+static char announceMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 ESPGizmo::ESPGizmo() {
 }
@@ -52,6 +62,10 @@ const char *ESPGizmo::getTopicPrefix() {
 
 ESP8266WebServer *ESPGizmo::httpServer() {
     return server;
+}
+
+void ESPGizmo::led(boolean on) {
+    digitalWrite(BUILTIN_LED, on ? LOW : HIGH);
 }
 
 void ESPGizmo::initToSaneValues() {
@@ -124,8 +138,28 @@ void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
     }
 }
 
+void ESPGizmo::schedulePublish(char *topic, char *payload, boolean retain) {
+    scheduledRetain = retain;
+    scheduledPayload = payload;
+    scheduledTopic = topic;
+}
+
+void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
+    if (!strcmp(topic, GIZMO_CONTROL_TOPIC)) {
+        if (!strcmp(value, "version")) {
+            schedulePublish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
+        } else if (!strncmp(value, "update ", 7) && (strstr(value, hostname) || strstr(value, topicPrefix))) {
+            scheduleUpdate();
+        } else if (!strncmp(value, "restart ", 8) && strstr(value, hostname)) {
+            scheduleRestart();
+       }
+    }
+}
+
 void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
     Serial.begin(115200);
+    pinMode(BUILTIN_LED, OUTPUT);
+    led(true);
     SPIFFS.begin();
 
     initToSaneValues();
@@ -243,6 +277,7 @@ void ESPGizmo::setupWiFi() {
     }
 
     Serial.printf("Hostname: %s\n", hostname);
+    snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
 
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
@@ -323,10 +358,9 @@ boolean ESPGizmo::mqttReconnect() {
     Serial.printf("Attempting connection to MQTT server %s as %s/%s\n",
             mqttHost, mqttUser, mqttPass);
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
-        // Once connected, publish an announcement...
-        char message[64];
-        snprintf(message, 64, "%s (%s)", hostname, version);
-        mqtt->publish("gizmo/started", message);
+        // Once connected, publish an announcement and subscribe...
+        mqtt->publish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
+        mqtt->subscribe(GIZMO_CONTROL_TOPIC);
         for (int i = 0; i < topicCount; i++) {
             mqtt->subscribe(topics[i]);
         }
@@ -362,6 +396,11 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
                     }
                 }
             } else {
+                if (scheduledTopic) {
+                    mqtt->publish(scheduledTopic, scheduledPayload, scheduledRetain);
+                    scheduledTopic = NULL;
+                    scheduledPayload = NULL;
+                }
                 mqtt->loop();
             }
         }
@@ -369,6 +408,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
         if (callAfterConnection && mqttReady && afterConnection) {
             callAfterConnection = false;
             afterConnection();
+            led(false);
         }
     }
     ArduinoOTA.handle();
@@ -433,7 +473,7 @@ void ESPGizmo::saveNetworkConfig() {
 
 void ESPGizmo::setMQTTLastWill(const char* willTopic, const char* willMessage,
                                uint8_t willQos, bool willRetain) {
-
+    Serial.println("Not implemented yet.");
 }
 
 void ESPGizmo::loadMQTTConfig() {

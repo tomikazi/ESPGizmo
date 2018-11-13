@@ -25,11 +25,14 @@ public:
     const char *getTopicPrefix();
     const char *getSSID();
 
+    void led(boolean on);
+
     void setCallback(void (*callback)(char*, uint8_t*, unsigned int));
     void addTopic(const char *topic);
     void addTopic(const char *topic, const char *uniqueName);
     void publish(char *topic, char *payload);
     void publish(char *topic, char *payload, boolean retain);
+    void schedulePublish(char *topic, char *payload, boolean retain);
 
     ESP8266WebServer *httpServer();
     void setUpdateURL(const char *url);
@@ -40,6 +43,8 @@ public:
     void scheduleUpdate();
 
     int updateSoftware(const char *url);
+
+    void handleMQTTMessage(const char *topic, const char *value);
 
     // Not implemented yet
     void setMQTTLastWill(const char* willTopic, const char* willMessage,
