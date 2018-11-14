@@ -134,7 +134,15 @@ void ESPGizmo::publish(char *topic, char *payload) {
 
 void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
     if (mqttConfigured && mqtt) {
-        mqtt->publish(topic, payload, retain);
+        if (strstr(topic, "%s")) {
+            char tt[MAX_TOPIC_SIZE];
+            snprintf(tt, MAX_TOPIC_SIZE, topic, getTopicPrefix());
+            mqtt->publish(tt, payload, retain);
+        } else {
+            mqtt->publish(topic, payload, retain);
+        }
+    } else {
+        Serial.printf("no mqtt...");
     }
 }
 
@@ -397,7 +405,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
                 }
             } else {
                 if (scheduledTopic) {
-                    mqtt->publish(scheduledTopic, scheduledPayload, scheduledRetain);
+                    publish(scheduledTopic, scheduledPayload, scheduledRetain);
                     scheduledTopic = NULL;
                     scheduledPayload = NULL;
                 }

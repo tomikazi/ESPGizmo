@@ -4,7 +4,7 @@
 #include <PubSubClient.h>
 #include <ESP8266WebServer.h>
 
-#define MAX_NAME_SIZE       16
+#define MAX_NAME_SIZE       32
 #define MAX_VERSION_SIZE    16
 #define MAX_SSID_SIZE       32
 #define MAX_PASSKEY_SIZE    32
