@@ -164,6 +164,15 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
     }
 }
 
+bool ESPGizmo::publishBinarySensor(bool nv, bool ov, char *topic) {
+    if (nv && !ov) {
+        publish(topic, "on", true);
+    } else if (!nv && ov) {
+        publish(topic, "off", true);
+    }
+    return nv;
+}
+
 void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
     Serial.begin(115200);
     pinMode(BUILTIN_LED, OUTPUT);

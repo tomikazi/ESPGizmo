@@ -34,6 +34,8 @@ public:
     void publish(char *topic, char *payload, boolean retain);
     void schedulePublish(char *topic, char *payload, boolean retain);
 
+    bool publishBinarySensor(bool nv, bool ov, char *topic);
+
     ESP8266WebServer *httpServer();
     void setUpdateURL(const char *url);
 
