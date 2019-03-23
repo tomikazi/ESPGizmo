@@ -132,6 +132,10 @@ void ESPGizmo::publish(char *topic, char *payload) {
     publish(topic, payload, false);
 }
 
+void ESPGizmo::publish(char *topic, const char *payload) {
+    publish(topic, (char *) payload);
+}
+
 void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
     if (mqttConfigured && mqtt) {
         if (strstr(topic, "%s")) {
@@ -146,10 +150,26 @@ void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
     }
 }
 
+void ESPGizmo::publish(char *topic, const char *payload, boolean retain) {
+    publish(topic, (char *) payload, retain);
+}
+
 void ESPGizmo::schedulePublish(char *topic, char *payload, boolean retain) {
     scheduledRetain = retain;
     scheduledPayload = payload;
     scheduledTopic = topic;
+}
+
+void ESPGizmo::schedulePublish(char *topic, char *payload) {
+    schedulePublish(topic, payload, false);
+}
+
+void ESPGizmo::schedulePublish(char *topic, const char *payload, boolean retain) {
+    schedulePublish(topic, (char *) payload, retain);
+}
+
+void ESPGizmo::schedulePublish(char *topic, const char *payload) {
+    schedulePublish(topic, payload, false);
 }
 
 void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {

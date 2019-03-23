@@ -32,7 +32,13 @@ public:
     void addTopic(const char *topic, const char *uniqueName);
     void publish(char *topic, char *payload);
     void publish(char *topic, char *payload, boolean retain);
+    void schedulePublish(char *topic, char *payload);
     void schedulePublish(char *topic, char *payload, boolean retain);
+
+    void publish(char *topic, const char *payload);
+    void publish(char *topic, const char *payload, boolean retain);
+    void schedulePublish(char *topic, const char *payload);
+    void schedulePublish(char *topic, const char *payload, boolean retain);
 
     bool publishBinarySensor(bool nv, bool ov, char *topic);
 
