@@ -180,7 +180,7 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
     if (!strcmp(topic, GIZMO_CONTROL_TOPIC)) {
         if (!strcmp(value, "version")) {
             schedulePublish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
-        } else if (!strncmp(value, "update ", 7) && (strstr(value, hostname) || strstr(value, topicPrefix))) {
+        } else if (!strncmp(value, "update ", 7) && (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
             scheduleUpdate();
         } else if (!strncmp(value, "restart ", 8) && strstr(value, hostname)) {
             scheduleRestart();
