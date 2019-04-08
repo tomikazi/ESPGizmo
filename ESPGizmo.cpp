@@ -38,7 +38,7 @@ static char *scheduledTopic = NULL;
 static char *scheduledPayload = NULL;
 static boolean scheduledRetain = false;
 
-#define MAX_ANNOUNCE_MESSAGE_SIZE   64
+#define MAX_ANNOUNCE_MESSAGE_SIZE   128
 static char announceMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 ESPGizmo::ESPGizmo() {
@@ -445,6 +445,7 @@ void ESPGizmo::setupMQTT() {
     if (strlen(mqttHost)) {
         Serial.printf("Attempting connection to MQTT server %s\n", mqttHost);
         mqttConfigured = true;
+        delay(100);
     } else {
         Serial.printf("No MQTT server configured\n");
     }
@@ -527,8 +528,10 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
         if (disconnected) {
             disconnected = false;
             callAfterConnection = true;
-            Serial.printf("Connected to %s with IP ", ssid);
-            Serial.println(WiFi.localIP());
+            Serial.printf("Connected to %s with IP %s\n", ssid, WiFi.localIP().toString().c_str());
+
+            snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s) %s/%s",
+                     hostname, version, WiFi.localIP().toString().c_str(), mac);
 
             mqtt = new PubSubClient(mqttHost, mqttPort, wifiClient);
             mqtt->setCallback(mqttCallback);
