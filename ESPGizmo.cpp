@@ -56,6 +56,10 @@ const char *ESPGizmo::getSSID() {
     return ssid;
 }
 
+const char *ESPGizmo::getMAC() {
+    return mac;
+}
+
 const char *ESPGizmo::getTopicPrefix() {
     return topicPrefix[0] != NULL ? topicPrefix : hostname;
 }
@@ -219,33 +223,53 @@ void ESPGizmo::endSetup() {
 
 void ESPGizmo::scheduleRestart() {
     Serial.printf("Scheduling restart\n");
-    restartTime = millis() + 1000;
+    restartTime = millis() + 1500;
 }
 
 void ESPGizmo::scheduleUpdate() {
     Serial.printf("Scheduling update\n");
-    updateTime = millis() + 1000;
+    updateTime = millis() + 1500;
 }
 
 
 void ESPGizmo::handleNetworkScanPage() {
-    char nets[MAX_HTML/2];
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Network Setup");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Network Setup");
+    server->sendContent(HTML_MENU);
+
+    server->sendContent("<form action=\"/netcfg\"><h3>Name</h3><input type=\"text\" name=\"name\" value=\"");
+    if (strlen(hostname)) server->sendContent(hostname);
+    server->sendContent("\" size=\"30\"><h3>Network</h3><select id=\"netlist\" onchange='document.getElementById(\"net\").value = document.getElementById(\"netlist\").value'>");
+
     int n = WiFi.scanNetworks();
-    nets[0] = NULL;
     for (int i = 0; i < n; i++) {
-        strcat(nets, "<option value=\"");
-        strcat(nets, WiFi.SSID(i).c_str());
-        strcat(nets, "\"");
+        server->sendContent("<option value=\"");
+        server->sendContent(WiFi.SSID(i).c_str());
         if (!strcmp(WiFi.SSID(i).c_str(), ssid)) {
-            strcat(nets, "selected");
+            server->sendContent("\" selected>");
+        } else {
+            server->sendContent("\">");
         }
-        strcat(nets, ">");
-        strcat(nets, WiFi.SSID(i).c_str());
-        strcat(nets, "</option>");
+        server->sendContent(WiFi.SSID(i).c_str());
+        server->sendContent("</option>");
     }
-    snprintf(html, MAX_HTML, NET_HTML, hostname, nets, ssid, passkey,
-             disconnected ? "not connected" : WiFi.localIP().toString().c_str());
-    server->send(200, "text/html", html);
+
+    server->sendContent("</select><p><input type=\"text\" id=\"net\" name=\"net\" value=\"");
+    if (strlen(ssid)) server->sendContent(ssid);
+    server->sendContent("\" size=\"30\"><h3>Password</h3><input type=\"password\" name=\"pass\" value=\"");
+    if (strlen(passkey)) server->sendContent(passkey);
+    server->sendContent("\" size=\"30\"><p><h3>IP Address</h3>");
+    server->sendContent(disconnected ? "not connected" : WiFi.localIP().toString().c_str());
+    server->sendContent("<p><p><h3>MAC Address</h3>");
+    server->sendContent(getMAC());
+    server->sendContent("<p><input type=\"submit\" value=\"Apply Changes\"></form>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
 }
 
 void ESPGizmo::handleNetworkConfig() {
@@ -254,8 +278,22 @@ void ESPGizmo::handleNetworkConfig() {
     strncpy(passkey, server->arg("pass").c_str(), MAX_PASSKEY_SIZE - 1);
     Serial.printf("Reconfiguring for connection to %s\n", ssid);
 
-    snprintf(html, MAX_HTML, NETCFG_HTML, ssid);
-    server->send(200, "text/html", html);
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Network Reconfigured");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_REDIRECT_START);
+    server->sendContent("/nets");
+    server->sendContent(HTML_REDIRECT_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Network Reconfigured");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<p>Reconfigured WiFi for connection to ");
+    if (strlen(ssid)) server->sendContent(ssid);
+    server->sendContent(". Restarting...</p>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
 
     saveNetworkConfig();
     WiFi.disconnect(true);
@@ -263,9 +301,31 @@ void ESPGizmo::handleNetworkConfig() {
 }
 
 void ESPGizmo::handleMQTTPage() {
-    char nets[MAX_HTML/2];
-    snprintf(html, MAX_HTML, MQTT_HTML, mqttHost, mqttPort, mqttUser, mqttPass, topicPrefix);
-    server->send(200, "text/html", html);
+    char port[8];
+
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("MQTT Setup");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("MQTT Setup");
+    server->sendContent(HTML_MENU);
+
+    server->sendContent("<form action=\"/mqttcfg\"><h3>MQTT Host</h3><input type=\"text\" name=\"host\" value=\"");
+    if (strlen(mqttHost)) server->sendContent(mqttHost);
+    server->sendContent("\" size=\"30\"><h3>MQTT Port</h3><input type=\"text\" name=\"port\" value=\"");
+    snprintf(port, 8, "%d", mqttPort);
+    server->sendContent(port);
+    server->sendContent("\" size=\"30\"><p><h3>User Name</h3><input type=\"password\" name=\"user\" value=\"");
+    if (strlen(mqttUser)) server->sendContent(mqttUser);
+    server->sendContent("\" size=\"30\"><p><h3>Password</h3><input type=\"password\" name=\"pass\" value=\"");
+    if (strlen(mqttPass)) server->sendContent(mqttPass);
+    server->sendContent("\" size=\"30\"><p><h3>Topic Prefix</h3><input type=\"text\" name=\"prefix\" value=\"");
+    if (strlen(topicPrefix)) server->sendContent(topicPrefix);
+    server->sendContent("\" size=\"30\"><p><input type=\"submit\" value=\"Apply Changes\"></form>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
 }
 
 void ESPGizmo::handleMQTTConfig() {
@@ -278,16 +338,67 @@ void ESPGizmo::handleMQTTConfig() {
     strncpy(topicPrefix, server->arg("prefix").c_str(), MAX_SSID_SIZE - 1);
     Serial.printf("Reconfiguring for connection to %s\n", mqttHost);
 
-    snprintf(html, MAX_HTML, MQTTCFG_HTML, mqttHost);
-    server->send(200, "text/html", html);
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("MQTT Reconfigured");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_REDIRECT_START);
+    server->sendContent("/mqtt");
+    server->sendContent(HTML_REDIRECT_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("MQTT Reconfigured");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<p>Reconfigured MQTT for connection to ");
+    if (strlen(mqttHost)) server->sendContent(mqttHost);
+    server->sendContent(". Restarting...</p>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
 
     saveMQTTConfig();
+    WiFi.disconnect(true);
     scheduleRestart();
 }
 
 void ESPGizmo::handleUpdate() {
-    snprintf(html, MAX_HTML, UPDATE_HTML, updateUrl, version);
-    server->send(200, "text/html", html);
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Software Update");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Software Update");
+    server->sendContent(HTML_MENU);
+
+    server->sendContent("<form action=\"/doupdate\"><h3>Name</h3>");
+    if (strlen(name)) server->sendContent(name);
+    server->sendContent("<h3>Version</h3>");
+    if (strlen(version)) server->sendContent(version);
+    server->sendContent("<h3>URL</h3>");
+    if (strlen(updateUrl)) server->sendContent(updateUrl);
+    server->sendContent("<p><input type=\"submit\" value=\"Update\"></form>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
+}
+
+void ESPGizmo::handleDoUpdate() {
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Update Requested");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_REDIRECT_LONG_START);
+    server->sendContent("/update");
+    server->sendContent(HTML_REDIRECT_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Update Requested");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<p>Update requested from ");
+    if (strlen(updateUrl)) server->sendContent(updateUrl);
+    server->sendContent("</p><p>Restarting...</p>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
+
     scheduleUpdate();
 }
 
@@ -308,6 +419,8 @@ void ESPGizmo::setupWiFi() {
     }
 
     WiFi.softAPmacAddress(macAddr);
+    sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X",
+            macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
     sprintf(defaultHostname, "%s-%02X%02X%02X", name, macAddr[3], macAddr[4], macAddr[5]);
     if (strlen(hostname) < 2) {
         strcpy(hostname, defaultHostname);
@@ -349,6 +462,7 @@ void ESPGizmo::setUpdateURL(const char *url) {
     updateUrl = (char *) url;
     if (strlen(updateUrl)) {
         server->on("/update", std::bind(&ESPGizmo::handleUpdate, this));
+        server->on("/doupdate", std::bind(&ESPGizmo::handleDoUpdate, this));
     }
 }
 
@@ -374,7 +488,7 @@ void ESPGizmo::setupOTA() {
 }
 
 int ESPGizmo::updateSoftware(const char *url) {
-    Serial.printf("Updating software from %s ; current version %s\n", url, version);
+    Serial.printf("Updating software from %s; current version %s\n", url, version);
     t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
     switch(ret) {
         case HTTP_UPDATE_FAILED:

@@ -8,6 +8,7 @@
 #define MAX_VERSION_SIZE    16
 #define MAX_SSID_SIZE       32
 #define MAX_PASSKEY_SIZE    32
+#define MAX_MAC_SIZE        18
 
 #define MAX_MQTT_HOST_SIZE  32
 #define MAX_MQTT_USER_SIZE  32
@@ -24,6 +25,7 @@ public:
     const char *getHostname();
     const char *getTopicPrefix();
     const char *getSSID();
+    const char *getMAC();
 
     void led(boolean on);
 
@@ -63,6 +65,7 @@ private:
 
     char name[MAX_NAME_SIZE];
     char version[MAX_VERSION_SIZE];
+    char mac[MAX_MAC_SIZE];
 
     char defaultHostname[MAX_SSID_SIZE];
     char hostname[MAX_SSID_SIZE];
@@ -104,6 +107,7 @@ private:
     void handleMQTTPage();
     void handleMQTTConfig();
     void handleUpdate();
+    void handleDoUpdate();
 
     void restart();
     boolean mqttReconnect();
