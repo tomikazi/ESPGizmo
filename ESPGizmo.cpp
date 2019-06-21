@@ -7,6 +7,8 @@
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 
+#define LED 2
+
 #define WIFI_DATA   "cfg/wifi"
 #define MQTT_DATA   "cfg/mqtt"
 
@@ -17,8 +19,8 @@
 #define GIZMO_CONSOLE_TOPIC   "gizmo/console"
 #define GIZMO_CONTROL_TOPIC  "gizmo/control"
 
-#define MAX_HTML    2048
-static char html[MAX_HTML];
+//#define MAX_HTML    2048
+//static char html[MAX_HTML];
 
 #define MQTT_RECONNECT_FREQUENCY    5000
 
@@ -61,7 +63,7 @@ const char *ESPGizmo::getMAC() {
 }
 
 const char *ESPGizmo::getTopicPrefix() {
-    return topicPrefix[0] != NULL ? topicPrefix : hostname;
+    return topicPrefix[0] != '\0' ? topicPrefix : hostname;
 }
 
 ESP8266WebServer *ESPGizmo::httpServer() {
@@ -69,22 +71,22 @@ ESP8266WebServer *ESPGizmo::httpServer() {
 }
 
 void ESPGizmo::led(boolean on) {
-    digitalWrite(BUILTIN_LED, on ? LOW : HIGH);
+    digitalWrite(LED, on ? LOW : HIGH);
 }
 
 void ESPGizmo::initToSaneValues() {
-    ssid[0] = NULL;
-    passkey[0] = NULL;
-    mqttHost[0] = NULL;
-    mqttUser[0] = NULL;
-    mqttPass[0] = NULL;
+    ssid[0] = '\0';
+    passkey[0] = '\0';
+    mqttHost[0] = '\0';
+    mqttUser[0] = '\0';
+    mqttPass[0] = '\0';
 }
 
-void ESPGizmo::setCallback(void (*callback)(char*, uint8_t*, unsigned int)) {
+void ESPGizmo::setCallback(void (*callback)(char *, uint8_t *, unsigned int)) {
     mqttCallback = callback;
 }
 
-void replaceSubstring(char *string,char *sub,char *rep) {
+void replaceSubstring(char *string, const char *sub, const char *rep) {
     int stringLen, subLen, newLen;
     int i = 0, j, k;
     int flag = 0, start, end;
@@ -127,7 +129,7 @@ void ESPGizmo::addTopic(const char *topic) {
 void ESPGizmo::addTopic(const char *topic, const char *uniqueName) {
     if (topicCount < MAX_TOPIC_COUNT) {
         strncpy(topics[topicCount], topic, MAX_TOPIC_SIZE - 1);
-        replaceSubstring(topics[topicCount], "%s", (char *) uniqueName);
+        replaceSubstring(topics[topicCount], "%s", uniqueName);
         topicCount = topicCount + 1;
     }
 }
@@ -180,11 +182,12 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
     if (!strcmp(topic, GIZMO_CONTROL_TOPIC)) {
         if (!strcmp(value, "version")) {
             schedulePublish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
-        } else if (!strncmp(value, "update ", 7) && (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
+        } else if (!strncmp(value, "update ", 7) &&
+                   (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
             scheduleUpdate();
         } else if (!strncmp(value, "restart ", 8) && strstr(value, hostname)) {
             scheduleRestart();
-       }
+        }
     }
 }
 
@@ -199,7 +202,7 @@ bool ESPGizmo::publishBinarySensor(bool nv, bool ov, char *topic) {
 
 void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
     Serial.begin(115200);
-    pinMode(BUILTIN_LED, OUTPUT);
+    pinMode(LED, OUTPUT);
     led(true);
     SPIFFS.begin();
 
@@ -244,7 +247,8 @@ void ESPGizmo::handleNetworkScanPage() {
 
     server->sendContent("<form action=\"/netcfg\"><h3>Name</h3><input type=\"text\" name=\"name\" value=\"");
     if (strlen(hostname)) server->sendContent(hostname);
-    server->sendContent("\" size=\"30\"><h3>Network</h3><select id=\"netlist\" onchange='document.getElementById(\"net\").value = document.getElementById(\"netlist\").value'>");
+    server->sendContent(
+            "\" size=\"30\"><h3>Network</h3><select id=\"netlist\" onchange='document.getElementById(\"net\").value = document.getElementById(\"netlist\").value'>");
 
     int n = WiFi.scanNetworks();
     for (int i = 0; i < n; i++) {
@@ -402,6 +406,43 @@ void ESPGizmo::handleDoUpdate() {
     scheduleUpdate();
 }
 
+static File uploadFile;
+static uint32_t uploadSize;
+
+void ESPGizmo::startUpload() {
+    server->send(200, "text/plain", "");
+}
+
+void ESPGizmo::handleUpload() {
+    static char name[64];
+    HTTPUpload &upload = server->upload();
+    snprintf(name, 63, "/%s", upload.filename.c_str());
+    Serial.printf("Uploading %s... phase %d, total=%u, current=%u, name=%s, type=%s\n",
+            name, upload.status, upload.totalSize, upload.currentSize,
+            upload.name.c_str(), upload.type.c_str());
+
+    if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("Starting upload for %s\n", name);
+        uploadFile = SPIFFS.open(name, "w");
+        if (!uploadFile) {
+            Serial.printf("Upload failed to open destination file\n");
+        }
+        uploadSize = 0;
+
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (uploadFile) {
+            uploadSize += uploadFile.write(upload.buf, upload.currentSize);
+        }
+
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (uploadFile) {
+            uploadFile.close();
+        }
+        Serial.printf("Uploaded %u bytes\n", uploadSize);
+    }
+    yield();
+}
+
 void ESPGizmo::restart() {
     Serial.println("Restarting...");
     ESP.restart();
@@ -457,6 +498,7 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/netcfg", std::bind(&ESPGizmo::handleNetworkConfig, this));
     server->on("/mqtt", std::bind(&ESPGizmo::handleMQTTPage, this));
     server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
+    server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -491,7 +533,7 @@ void ESPGizmo::setupOTA() {
 int ESPGizmo::updateSoftware(const char *url) {
     Serial.printf("Updating software from %s; current version %s\n", url, version);
     t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
-    switch(ret) {
+    switch (ret) {
         case HTTP_UPDATE_FAILED:
             Serial.println("Software update failed.");
             return -1;
@@ -508,7 +550,7 @@ int ESPGizmo::updateSoftware(const char *url) {
 
 boolean ESPGizmo::mqttReconnect() {
     Serial.printf("Attempting connection to MQTT server %s as %s/%s\n",
-            mqttHost, mqttUser, mqttPass);
+                  mqttHost, mqttUser, mqttPass);
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
         // Once connected, publish an announcement and subscribe...
         mqtt->publish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
@@ -588,14 +630,14 @@ char *trimWhiteSpace(char *str) {
     char *end;
 
     // Trim leading space
-    while(isspace((unsigned char)*str)) str++;
+    while (isspace((unsigned char) *str)) str++;
 
-    if(*str == 0)  // All spaces?
+    if (*str == 0)  // All spaces?
         return str;
 
     // Trim trailing space
     end = str + strlen(str) - 1;
-    while(end > str && isspace((unsigned char)*end)) end--;
+    while (end > str && isspace((unsigned char) *end)) end--;
 
     // Write new null terminator character
     end[1] = '\0';
@@ -607,11 +649,11 @@ void ESPGizmo::loadNetworkConfig() {
     File f = SPIFFS.open(WIFI_DATA, "r");
     if (f) {
         int l = f.readBytesUntil('|', ssid, MAX_SSID_SIZE - 1);
-        ssid[l] = NULL;
+        ssid[l] = '\0';
         l = f.readBytesUntil('|', passkey, MAX_PASSKEY_SIZE - 1);
-        passkey[l] = NULL;
+        passkey[l] = '\0';
         l = f.readBytesUntil('|', hostname, MAX_SSID_SIZE - 1);
-        hostname[l] = NULL;
+        hostname[l] = '\0';
         trimWhiteSpace(hostname);
         f.close();
     }
@@ -625,7 +667,7 @@ void ESPGizmo::saveNetworkConfig() {
     }
 }
 
-void ESPGizmo::setMQTTLastWill(const char* willTopic, const char* willMessage,
+void ESPGizmo::setMQTTLastWill(const char *willTopic, const char *willMessage,
                                uint8_t willQos, bool willRetain) {
     Serial.println("Not implemented yet.");
 }
@@ -635,16 +677,16 @@ void ESPGizmo::loadMQTTConfig() {
     if (f) {
         int l = f.readBytesUntil('|', mqttHost, MAX_MQTT_HOST_SIZE - 1);
         char port[8];
-        mqttHost[l] = NULL;
+        mqttHost[l] = '\0';
         l = f.readBytesUntil('|', port, 7);
-        port[l] = NULL;
+        port[l] = '\0';
         mqttPort = atoi(port);
         l = f.readBytesUntil('|', mqttUser, MAX_MQTT_USER_SIZE - 1);
-        mqttUser[l] = NULL;
+        mqttUser[l] = '\0';
         l = f.readBytesUntil('|', mqttPass, MAX_MQTT_PASS_SIZE - 1);
-        mqttPass[l] = NULL;
+        mqttPass[l] = '\0';
         l = f.readBytesUntil('|', topicPrefix, MAX_SSID_SIZE - 1);
-        topicPrefix[l] = NULL;
+        topicPrefix[l] = '\0';
         f.close();
     }
 }

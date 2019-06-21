@@ -108,6 +108,8 @@ private:
     void handleMQTTConfig();
     void handleUpdate();
     void handleDoUpdate();
+    void startUpload();
+    void handleUpload();
 
     void restart();
     boolean mqttReconnect();
