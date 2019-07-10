@@ -51,8 +51,10 @@ public:
 
     void scheduleRestart();
     void scheduleUpdate();
+    void scheduleFileUpdate();
 
     int updateSoftware(const char *url);
+    int updateFiles(const char *url);
 
     void handleMQTTMessage(const char *topic, const char *value);
 
@@ -108,6 +110,8 @@ private:
     void handleMQTTConfig();
     void handleUpdate();
     void handleDoUpdate();
+    void handleDoFileUpdate();
+    void handleReset();
     void startUpload();
     void handleUpload();
 

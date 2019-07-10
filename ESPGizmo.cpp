@@ -4,6 +4,7 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 
@@ -35,6 +36,7 @@ static boolean mqttConfigured = false;
 static uint32_t lastReconnectAttempt = 0;
 static uint32_t restartTime = 0;
 static uint32_t updateTime = 0;
+static uint32_t fileUpdateTime = 0;
 
 static char *scheduledTopic = NULL;
 static char *scheduledPayload = NULL;
@@ -181,10 +183,13 @@ void ESPGizmo::schedulePublish(char *topic, const char *payload) {
 void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
     if (!strcmp(topic, GIZMO_CONTROL_TOPIC)) {
         if (!strcmp(value, "version")) {
-            schedulePublish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
+            schedulePublish((char *) GIZMO_CONSOLE_TOPIC, announceMessage, false);
         } else if (!strncmp(value, "update ", 7) &&
                    (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
             scheduleUpdate();
+        } else if (!strncmp(value, "fileUpdate ", 11) &&
+                   (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
+            scheduleFileUpdate();
         } else if (!strncmp(value, "restart ", 8) && strstr(value, hostname)) {
             scheduleRestart();
         }
@@ -233,6 +238,12 @@ void ESPGizmo::scheduleUpdate() {
     Serial.printf("Scheduling update\n");
     updateTime = millis() + 1500;
 }
+
+void ESPGizmo::scheduleFileUpdate() {
+    Serial.printf("Scheduling file update\n");
+    fileUpdateTime = millis() + 1500;
+}
+
 
 
 void ESPGizmo::handleNetworkScanPage() {
@@ -284,14 +295,14 @@ void ESPGizmo::handleNetworkConfig() {
 
     server->setContentLength(CONTENT_LENGTH_UNKNOWN);
     server->send(200, "text/html", HTML_HEAD);
-    server->sendContent("Network Reconfigured");
+    server->sendContent("Network Configured");
     server->sendContent(HTML_TITLE_END);
     server->sendContent(HTML_REDIRECT_START);
     server->sendContent("/nets");
     server->sendContent(HTML_REDIRECT_END);
     server->sendContent(HTML_CSS_MENU);
     server->sendContent(HTML_BODY);
-    server->sendContent("Network Reconfigured");
+    server->sendContent("Network Configured");
     server->sendContent(HTML_MENU);
     server->sendContent("<p>Reconfigured WiFi for connection to ");
     if (strlen(ssid)) server->sendContent(ssid);
@@ -374,13 +385,16 @@ void ESPGizmo::handleUpdate() {
     server->sendContent("Software Update");
     server->sendContent(HTML_MENU);
 
-    server->sendContent("<form action=\"/doupdate\"><h3>Name</h3>");
+    server->sendContent("<h3>Name</h3>");
     if (strlen(name)) server->sendContent(name);
     server->sendContent("<h3>Version</h3>");
     if (strlen(version)) server->sendContent(version);
     server->sendContent("<h3>URL</h3>");
     if (strlen(updateUrl)) server->sendContent(updateUrl);
-    server->sendContent("<p><input type=\"submit\" value=\"Update\"></form>");
+
+    server->sendContent("<p><form action=\"/doupdate\"><input type=\"submit\" value=\"Update\"></form>");
+    server->sendContent("<p><form action=\"/dofileupdate\"><input type=\"submit\" value=\"Update Files\"></form>");
+    server->sendContent("<p><form action=\"/reset\"><input type=\"submit\" value=\"Reset\"></form>");
     server->sendContent(HTML_END);
     server->sendContent("");
 }
@@ -402,8 +416,45 @@ void ESPGizmo::handleDoUpdate() {
     server->sendContent("</p><p>Restarting...</p>");
     server->sendContent(HTML_END);
     server->sendContent("");
-
     scheduleUpdate();
+}
+
+void ESPGizmo::handleDoFileUpdate() {
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Updating Files");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_REDIRECT_START);
+    server->sendContent("/update");
+    server->sendContent(HTML_REDIRECT_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Updating Files");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<p>Update requested from ");
+    if (strlen(updateUrl)) server->sendContent(updateUrl);
+    server->sendContent("</p><p>Please wait...</p>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
+    scheduleFileUpdate();
+}
+
+void ESPGizmo::handleReset() {
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Resetting...");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_REDIRECT_START);
+    server->sendContent("/update");
+    server->sendContent(HTML_REDIRECT_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Resetting...");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<p>Reset requested!</p><p>Please wait...</p>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
+    scheduleRestart();
 }
 
 static File uploadFile;
@@ -483,7 +534,7 @@ void ESPGizmo::setupWiFi() {
 
 void ESPGizmo::setupMQTT() {
     loadMQTTConfig();
-    if (strlen(mqttHost)) {
+    if (mqttHost && strlen(mqttHost)) {
         Serial.printf("Attempting connection to MQTT server %s\n", mqttHost);
         mqttConfigured = true;
         delay(100);
@@ -499,6 +550,7 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/mqtt", std::bind(&ESPGizmo::handleMQTTPage, this));
     server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
     server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
+    server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -506,6 +558,7 @@ void ESPGizmo::setUpdateURL(const char *url) {
     if (strlen(updateUrl)) {
         server->on("/update", std::bind(&ESPGizmo::handleUpdate, this));
         server->on("/doupdate", std::bind(&ESPGizmo::handleDoUpdate, this));
+        server->on("/dofileupdate", std::bind(&ESPGizmo::handleDoFileUpdate, this));
     }
 }
 
@@ -544,6 +597,49 @@ int ESPGizmo::updateSoftware(const char *url) {
             // may not be called due to race with reboot
             Serial.println("Software updated!");
             return 1;
+    }
+    return 0;
+}
+
+static HTTPClient httpClient;
+
+WiFiClient *startDownload(const char *url, const char *file) {
+    char xurl[256];
+    snprintf(xurl, 255, "%s.data%s", url, file);
+    Serial.printf("Starting download of %s from %s\n", file, xurl);
+    httpClient.begin(xurl);
+    int code = httpClient.GET();
+    return code == HTTP_CODE_OK ? httpClient.getStreamPtr() : NULL;
+}
+
+void downloadAndSave(const char *url, const char *file) {
+    WiFiClient *stream = startDownload(url, file);
+    if (stream) {
+        File f = SPIFFS.open(file, "w");
+        if (f) {
+            Serial.printf("Downloading %s ... ", file);
+            int b;
+            while ((b = stream->read()) != -1) {
+                f.write(b);
+            }
+            f.close();
+            Serial.printf("Done\n");
+        }
+        httpClient.end();
+    }
+}
+
+int ESPGizmo::updateFiles(const char *url) {
+    downloadAndSave(url, "/catalog");
+    File cat = SPIFFS.open("/catalog", "r");
+    if (cat) {
+        char file[32];
+        int l;
+        while ((l = cat.readBytesUntil('\n', file, 31)) > 0) {
+            file[l] = '\0';
+            downloadAndSave(url, file);
+        };
+        cat.close();
     }
     return 0;
 }
@@ -615,6 +711,11 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
         updateTime = 0;
     }
 
+    if (fileUpdateTime && fileUpdateTime < millis()) {
+        updateFiles(updateUrl);
+        fileUpdateTime = 0;
+    }
+
     if (restartTime && restartTime < millis()) {
         restart();
     }
@@ -669,7 +770,7 @@ void ESPGizmo::saveNetworkConfig() {
 
 void ESPGizmo::setMQTTLastWill(const char *willTopic, const char *willMessage,
                                uint8_t willQos, bool willRetain) {
-    Serial.println("Not implemented yet.");
+    Serial.printf("Not implemented yet: %s, %s, %d, %d", willTopic, willMessage, willQos, willRetain);
 }
 
 void ESPGizmo::loadMQTTConfig() {
