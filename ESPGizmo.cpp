@@ -245,7 +245,6 @@ void ESPGizmo::scheduleFileUpdate() {
 }
 
 
-
 void ESPGizmo::handleNetworkScanPage() {
     server->setContentLength(CONTENT_LENGTH_UNKNOWN);
     server->send(200, "text/html", HTML_HEAD);
@@ -424,8 +423,8 @@ void ESPGizmo::handleDoFileUpdate() {
     server->send(200, "text/html", HTML_HEAD);
     server->sendContent("Updating Files");
     server->sendContent(HTML_TITLE_END);
-    server->sendContent(HTML_REDIRECT_START);
-    server->sendContent("/update");
+    server->sendContent(HTML_REDIRECT_LONG_START);
+    server->sendContent("/files");
     server->sendContent(HTML_REDIRECT_END);
     server->sendContent(HTML_CSS_MENU);
     server->sendContent(HTML_BODY);
@@ -455,6 +454,38 @@ void ESPGizmo::handleReset() {
     server->sendContent(HTML_END);
     server->sendContent("");
     scheduleRestart();
+}
+
+void listDir(ESP8266WebServer *server, const char *path) {
+    Dir dir = SPIFFS.openDir(path);
+    while (dir.next()) {
+        char line[128];
+        char name[48];
+        name[0] = '\0';
+        strncat(name, dir.fileName().c_str(), 47);
+        Serial.printf("%s\t%d\n", name, dir.fileSize());
+        snprintf(line, 127, "%-32s %8d<br>", name, dir.fileSize());
+        server->sendContent(line);
+    }
+}
+
+void ESPGizmo::handleFiles() {
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Files");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Files");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<pre>");
+
+    listDir(server, "");
+
+    server->sendContent("</pre>");
+    server->sendContent("<p><form action=\"/dofileupdate\"><input type=\"submit\" value=\"Update Files\"></form>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
 }
 
 static File uploadFile;
@@ -551,6 +582,7 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
     server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
+    server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -601,19 +633,18 @@ int ESPGizmo::updateSoftware(const char *url) {
     return 0;
 }
 
-static HTTPClient httpClient;
-
-WiFiClient *startDownload(const char *url, const char *file) {
+WiFiClient *startDownload(HTTPClient *httpClient, const char *url, const char *file) {
     char xurl[256];
     snprintf(xurl, 255, "%s.data%s", url, file);
     Serial.printf("Starting download of %s from %s\n", file, xurl);
-    httpClient.begin(xurl);
-    int code = httpClient.GET();
-    return code == HTTP_CODE_OK ? httpClient.getStreamPtr() : NULL;
+    httpClient->begin(xurl);
+    int code = httpClient->GET();
+    return code == HTTP_CODE_OK ? httpClient->getStreamPtr() : NULL;
 }
 
 void downloadAndSave(const char *url, const char *file) {
-    WiFiClient *stream = startDownload(url, file);
+    HTTPClient httpClient;
+    WiFiClient *stream = startDownload(&httpClient, url, file);
     if (stream) {
         File f = SPIFFS.open(file, "w");
         if (f) {
@@ -626,6 +657,7 @@ void downloadAndSave(const char *url, const char *file) {
             Serial.printf("Done\n");
         }
         httpClient.end();
+        delay(100);
     }
 }
 

@@ -108,6 +108,7 @@ private:
     void handleNetworkConfig();
     void handleMQTTPage();
     void handleMQTTConfig();
+    void handleFiles();
     void handleUpdate();
     void handleDoUpdate();
     void handleDoFileUpdate();

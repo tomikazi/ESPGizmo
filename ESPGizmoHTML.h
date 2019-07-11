@@ -30,6 +30,7 @@ function menu() { let m = document.getElementById(\"menu\"); m.hidden = !m.hidde
 <a href=\"/\"><p>Home</p></a>\
 <a href=\"nets\"><p>Network</p></a>\
 <a href=\"mqtt\"><p>MQTT</p></a>\
+<a href=\"files\"><p>Files</p></a>\
 <a href=\"update\"><p>Update</p></a>\
 </div>\
 <div class=\"main\">"
