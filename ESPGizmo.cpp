@@ -2,9 +2,7 @@
 #include <ESPGizmoHTML.h>
 #include <FS.h>
 
-#include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
-#include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 
@@ -484,6 +482,9 @@ void ESPGizmo::handleFiles() {
 
     server->sendContent("</pre>");
     server->sendContent("<p><form action=\"/dofileupdate\"><input type=\"submit\" value=\"Update Files\"></form>");
+    if (fileUploadFailed) {
+        server->sendContent("<p>Last file upload failed!<p>");
+    }
     server->sendContent(HTML_END);
     server->sendContent("");
 }
@@ -633,43 +634,63 @@ int ESPGizmo::updateSoftware(const char *url) {
     return 0;
 }
 
-WiFiClient *startDownload(HTTPClient *httpClient, const char *url, const char *file) {
+int ESPGizmo::downloadAndSave(const char *url, const char *file) {
     char xurl[256];
     snprintf(xurl, 255, "%s.data%s", url, file);
-    Serial.printf("Starting download of %s from %s\n", file, xurl);
-    httpClient->begin(xurl);
-    int code = httpClient->GET();
-    return code == HTTP_CODE_OK ? httpClient->getStreamPtr() : NULL;
-}
+    Serial.printf("Starting download of %s...\n", file);
 
-void downloadAndSave(const char *url, const char *file) {
     HTTPClient httpClient;
-    WiFiClient *stream = startDownload(&httpClient, url, file);
+    httpClient.begin(xurl);
+
+    const char* headerKeys[] = { "Content-Length" };
+    httpClient.collectHeaders(headerKeys, 1);
+
+    int code = httpClient.GET();
+    if (code != HTTP_CODE_OK) {
+        Serial.printf("Unable to download %s\n", xurl);
+        return 0;
+    }
+
+    int length = httpClient.header("Content-Length").toInt();
+    int downloaded = 0;
+
+    WiFiClient *stream = httpClient.getStreamPtr();
     if (stream) {
         File f = SPIFFS.open(file, "w");
         if (f) {
-            Serial.printf("Downloading %s ... ", file);
+            Serial.printf("Downloading %d bytes of %s ... ", length, file);
             int b;
             while ((b = stream->read()) != -1) {
                 f.write(b);
+                downloaded++;
             }
             f.close();
-            Serial.printf("Done\n");
+            Serial.printf("%d bytes\n", downloaded);
         }
         httpClient.end();
         delay(100);
     }
+    return length == downloaded;
 }
 
 int ESPGizmo::updateFiles(const char *url) {
-    downloadAndSave(url, "/catalog");
+    fileUploadFailed = !downloadAndSave(url, "/catalog");
     File cat = SPIFFS.open("/catalog", "r");
-    if (cat) {
+    if (cat && !fileUploadFailed) {
         char file[32];
         int l;
         while ((l = cat.readBytesUntil('\n', file, 31)) > 0) {
             file[l] = '\0';
-            downloadAndSave(url, file);
+            int t = 5;
+            while (!downloadAndSave(url, file) && t > 0) {
+                Serial.printf("Failed to download file %s completely; retrying\n", file);
+                t--;
+                delay(500);
+            }
+            if (t == 0) {
+                Serial.printf("Failed to download file %s\n", file);
+                fileUploadFailed = true;
+            }
         };
         cat.close();
     }

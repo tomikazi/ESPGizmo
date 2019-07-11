@@ -3,6 +3,7 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPClient.h>
 
 #define MAX_NAME_SIZE       32
 #define MAX_VERSION_SIZE    16
@@ -86,6 +87,7 @@ private:
     char *willTopic, *willMessage;
     uint8_t willQos;
     bool willRetain;
+    bool fileUploadFailed = false;
 
     WiFiClient wifiClient;
     PubSubClient *mqtt;
@@ -97,6 +99,8 @@ private:
     void setupMQTT();
     void setupOTA();
     void setupHTTPServer();
+
+    int downloadAndSave(const char *url, const char *file);
 
     void loadNetworkConfig();
     void saveNetworkConfig();
