@@ -9,9 +9,6 @@
 
 #define LED 2
 
-#define WIFI_DATA   "cfg/wifi"
-#define MQTT_DATA   "cfg/mqtt"
-
 // WiFi connection attributes
 #define WIFI_CHANNEL        6
 #define MAX_CONNECTIONS     4
@@ -423,7 +420,7 @@ void ESPGizmo::handleDoFileUpdate() {
     server->send(200, "text/html", HTML_HEAD);
     server->sendContent("Updating Files");
     server->sendContent(HTML_TITLE_END);
-    server->sendContent(HTML_REDIRECT_LONG_START);
+    server->sendContent(HTML_REDIRECT_START);
     server->sendContent("/files");
     server->sendContent(HTML_REDIRECT_END);
     server->sendContent(HTML_CSS_MENU);
@@ -484,8 +481,11 @@ void ESPGizmo::handleFiles() {
 
     server->sendContent("</pre>");
     server->sendContent("<p><form action=\"/dofileupdate\"><input type=\"submit\" value=\"Update Files\"></form>");
+    if (updatingFiles) {
+        server->sendContent("<p>File update in progress...<p>");
+    }
     if (fileUploadFailed) {
-        server->sendContent("<p>Last file upload failed!<p>");
+        server->sendContent("<p>File update failed!<p>");
     }
     server->sendContent(HTML_END);
     server->sendContent("");
@@ -503,8 +503,8 @@ void ESPGizmo::handleUpload() {
     HTTPUpload &upload = server->upload();
     snprintf(name, 63, "/%s", upload.filename.c_str());
     Serial.printf("Uploading %s... phase %d, total=%u, current=%u, name=%s, type=%s\n",
-            name, upload.status, upload.totalSize, upload.currentSize,
-            upload.name.c_str(), upload.type.c_str());
+                  name, upload.status, upload.totalSize, upload.currentSize,
+                  upload.name.c_str(), upload.type.c_str());
 
     if (upload.status == UPLOAD_FILE_START) {
         Serial.printf("Starting upload for %s\n", name);
@@ -612,7 +612,6 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
     server->on("/hotspot-detect.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
-//    server->onNotFound(std::bind(&ESPGizmo::handleNotFound, this));
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -663,6 +662,29 @@ int ESPGizmo::updateSoftware(const char *url) {
     return 0;
 }
 
+bool isUpTodate(const char *file, const char *etag) {
+    char efn[48], et[32];
+    snprintf(efn, 47, "/etags%s", file);
+    File f = SPIFFS.open(efn, "r");
+    if (f) {
+        int l = f.readBytesUntil('\n', et, 31);
+        et[l] = '\0';
+        f.close();
+        return !strcmp(et, etag);
+    }
+    return false;
+}
+
+void saveEtag(const char *file, const char *etag) {
+    char efn[48];
+    snprintf(efn, 47, "/etags%s", file);
+    File f = SPIFFS.open(efn, "w");
+    if (f) {
+        f.printf("%s\n", etag);
+        f.close();
+    }
+}
+
 int ESPGizmo::downloadAndSave(const char *url, const char *file) {
     char xurl[256];
     snprintf(xurl, 255, "%s.data%s", url, file);
@@ -671,8 +693,8 @@ int ESPGizmo::downloadAndSave(const char *url, const char *file) {
     HTTPClient httpClient;
     httpClient.begin(xurl);
 
-    const char* headerKeys[] = { "Content-Length" };
-    httpClient.collectHeaders(headerKeys, 1);
+    const char *headerKeys[] = {"Content-Length", "ETag"};
+    httpClient.collectHeaders(headerKeys, 2);
 
     int code = httpClient.GET();
     if (code != HTTP_CODE_OK) {
@@ -680,29 +702,35 @@ int ESPGizmo::downloadAndSave(const char *url, const char *file) {
         return 0;
     }
 
-    int length = httpClient.header("Content-Length").toInt();
-    int downloaded = 0;
-
-    WiFiClient *stream = httpClient.getStreamPtr();
-    if (stream) {
-        File f = SPIFFS.open(file, "w");
-        if (f) {
-            Serial.printf("Downloading %d bytes of %s ... ", length, file);
-            int b;
-            while ((b = stream->read()) != -1) {
-                f.write(b);
-                downloaded++;
+    if (!isUpTodate(file, httpClient.header("ETag").c_str())) {
+        int length = httpClient.header("Content-Length").toInt();
+        int downloaded = 0;
+        WiFiClient *stream = httpClient.getStreamPtr();
+        if (stream) {
+            File f = SPIFFS.open(file, "w");
+            if (f) {
+                Serial.printf("Downloading %d bytes of %s ... ", length, file);
+                int b;
+                while ((b = stream->read()) != -1) {
+                    f.write(b);
+                    downloaded++;
+                }
+                f.close();
+                Serial.printf("%d bytes\n", downloaded);
+                if (length == downloaded) {
+                    saveEtag(file, httpClient.header("ETag").c_str());
+                }
             }
-            f.close();
-            Serial.printf("%d bytes\n", downloaded);
         }
         httpClient.end();
         delay(100);
+        return length == downloaded;
     }
-    return length == downloaded;
+    return 1;
 }
 
 int ESPGizmo::updateFiles(const char *url) {
+    updatingFiles = true;
     fileUploadFailed = !downloadAndSave(url, "/catalog");
     File cat = SPIFFS.open("/catalog", "r");
     if (cat && !fileUploadFailed) {
@@ -723,6 +751,7 @@ int ESPGizmo::updateFiles(const char *url) {
         };
         cat.close();
     }
+    updatingFiles = false;
     return 0;
 }
 
@@ -832,7 +861,7 @@ char *trimWhiteSpace(char *str) {
 }
 
 void ESPGizmo::loadNetworkConfig() {
-    File f = SPIFFS.open(WIFI_DATA, "r");
+    File f = SPIFFS.open(normalizeFile("cfg/wifi"), "r");
     if (f) {
         int l = f.readBytesUntil('|', ssid, MAX_SSID_SIZE - 1);
         ssid[l] = '\0';
@@ -846,7 +875,7 @@ void ESPGizmo::loadNetworkConfig() {
 }
 
 void ESPGizmo::saveNetworkConfig() {
-    File f = SPIFFS.open(WIFI_DATA, "w");
+    File f = SPIFFS.open("/cfg/wifi", "w");
     if (f) {
         f.printf("%s|%s|%s|\n", ssid, passkey, hostname);
         f.close();
@@ -859,7 +888,7 @@ void ESPGizmo::setMQTTLastWill(const char *willTopic, const char *willMessage,
 }
 
 void ESPGizmo::loadMQTTConfig() {
-    File f = SPIFFS.open(MQTT_DATA, "r");
+    File f = SPIFFS.open(normalizeFile("cfg/mqtt"), "r");
     if (f) {
         int l = f.readBytesUntil('|', mqttHost, MAX_MQTT_HOST_SIZE - 1);
         char port[8];
@@ -878,9 +907,23 @@ void ESPGizmo::loadMQTTConfig() {
 }
 
 void ESPGizmo::saveMQTTConfig() {
-    File f = SPIFFS.open(MQTT_DATA, "w");
+    File f = SPIFFS.open("/cfg/mqtt", "w");
     if (f) {
         f.printf("%s|%d|%s|%s|%s|\n", mqttHost, mqttPort, mqttUser, mqttPass, topicPrefix);
         f.close();
     }
+}
+
+static char normalized[36];
+
+char *normalizeFile(const char *file) {
+    if (file[0] == '/') {
+        return (char *) file;
+    }
+    snprintf(normalized, 32, "/%s", file);
+    if (SPIFFS.exists(file)) {
+        Serial.printf("Normalizing %s\n", file);
+        SPIFFS.rename(file, normalized);
+    }
+    return normalized;
 }

@@ -87,6 +87,7 @@ private:
     char *willTopic, *willMessage;
     uint8_t willQos;
     bool willRetain;
+    bool updatingFiles = false;
     bool fileUploadFailed = false;
 
     WiFiClient wifiClient;
@@ -127,3 +128,5 @@ private:
 
     void initToSaneValues();
 };
+
+extern char *normalizeFile(const char *file);
