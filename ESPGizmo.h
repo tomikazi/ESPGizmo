@@ -117,6 +117,8 @@ private:
     void handleDoUpdate();
     void handleDoFileUpdate();
     void handleReset();
+    void handleHotSpotDetect();
+    void handleNotFound();
     void startUpload();
     void handleUpload();
 

@@ -5,6 +5,7 @@
 #include <ESP8266mDNS.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
+#include <DNSServer.h>
 
 #define LED 2
 
@@ -13,13 +14,10 @@
 
 // WiFi connection attributes
 #define WIFI_CHANNEL        6
-#define MAX_CONNECTIONS     2
+#define MAX_CONNECTIONS     4
 
 #define GIZMO_CONSOLE_TOPIC   "gizmo/console"
 #define GIZMO_CONTROL_TOPIC  "gizmo/control"
-
-//#define MAX_HTML    2048
-//static char html[MAX_HTML];
 
 #define MQTT_RECONNECT_FREQUENCY    5000
 
@@ -42,6 +40,10 @@ static boolean scheduledRetain = false;
 
 #define MAX_ANNOUNCE_MESSAGE_SIZE   128
 static char announceMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
+
+#define DNS_PORT    53
+
+DNSServer dnsServer;
 
 ESPGizmo::ESPGizmo() {
 }
@@ -531,6 +533,29 @@ void ESPGizmo::restart() {
     ESP.restart();
 }
 
+
+int captiveCount = 0;
+
+void ESPGizmo::handleHotSpotDetect() {
+    Serial.printf("hotSpotDetect [%d, %s]\n", captiveCount, server->uri().c_str());
+    if (captiveCount == 0) {
+        server->send(200, "text/html", "<HTML><HEAD><TITLE>Captive</TITLE></HEAD><BODY>Captive</BODY></HTML>");
+        captiveCount++;
+    } else if (captiveCount == 1) {
+        server->send(200, "text/html", WELCOME_HTML);
+        captiveCount++;
+    } else {
+        server->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+        captiveCount = 0;
+    }
+}
+
+void ESPGizmo::handleNotFound() {
+    Serial.printf("notFound [%d, %s]\n", captiveCount, server->uri().c_str());
+    handleNetworkScanPage();
+    captiveCount = 0;
+}
+
 void ESPGizmo::setupWiFi() {
     WiFi.hostname(hostname);
 
@@ -560,6 +585,8 @@ void ESPGizmo::setupWiFi() {
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
 
+    dnsServer.start(DNS_PORT, "*", apIP);
+
     Serial.printf("WiFi %s started\n", hostname);
     delay(100);
 }
@@ -584,6 +611,8 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
+    server->on("/hotspot-detect.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+//    server->onNotFound(std::bind(&ESPGizmo::handleNotFound, this));
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -728,7 +757,9 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             mqtt->setCallback(mqttCallback);
 
             ArduinoOTA.begin();
-            MDNS.addService("http", "tcp", 80);
+            if (MDNS.begin(hostname)) {
+                MDNS.addService("http", "tcp", 80);
+            }
         }
 
         if (mqtt && mqttConfigured) {
@@ -756,6 +787,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             led(false);
         }
     }
+    dnsServer.processNextRequest();
     ArduinoOTA.handle();
     server->handleClient();
 
