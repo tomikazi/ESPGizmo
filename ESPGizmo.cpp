@@ -202,6 +202,10 @@ bool ESPGizmo::publishBinarySensor(bool nv, bool ov, char *topic) {
     return nv;
 }
 
+void ESPGizmo::suggestIP(IPAddress ipAddress) {
+    suggestedIP = ipAddress;
+}
+
 void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
     Serial.begin(115200);
     pinMode(LED, OUTPUT);
@@ -575,19 +579,18 @@ void ESPGizmo::setupWiFi() {
         strcpy(hostname, defaultHostname);
     }
 
-    Serial.printf("Hostname: %s\n", hostname);
     snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
 
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
 
-    IPAddress apIP = IPAddress(10, 10, 10, 1);
+    IPAddress apIP = suggestedIP;
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
 
     dnsServer.start(DNS_PORT, "*", apIP);
 
-    Serial.printf("WiFi %s started\n", hostname);
+    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d\n", hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
     delay(100);
 }
 
@@ -596,10 +599,10 @@ void ESPGizmo::setupMQTT() {
     if (mqttHost && strlen(mqttHost)) {
         Serial.printf("Attempting connection to MQTT server %s\n", mqttHost);
         mqttConfigured = true;
-        delay(100);
     } else {
-        Serial.printf("No MQTT server configured\n");
+        Serial.println("No MQTT server configured");
     }
+    delay(100);
 }
 
 void ESPGizmo::setupHTTPServer() {
@@ -710,10 +713,13 @@ int ESPGizmo::downloadAndSave(const char *url, const char *file) {
             File f = SPIFFS.open(file, "w");
             if (f) {
                 Serial.printf("Downloading %d bytes of %s ... ", length, file);
-                int b;
-                while ((b = stream->read()) != -1) {
-                    f.write(b);
-                    downloaded++;
+                uint8_t buf[1024];
+                size_t rl;
+                while ((rl = stream->read(buf, 1024)) > 0) {
+                    f.write(buf, rl);
+                    downloaded += rl;
+                    delay(20);
+                    yield();
                 }
                 f.close();
                 Serial.printf("%d bytes\n", downloaded);
@@ -738,7 +744,7 @@ int ESPGizmo::updateFiles(const char *url) {
         int l;
         while ((l = cat.readBytesUntil('\n', file, 31)) > 0) {
             file[l] = '\0';
-            int t = 5;
+            int t = 10;
             while (!downloadAndSave(url, file) && t > 0) {
                 Serial.printf("Failed to download file %s completely; retrying\n", file);
                 t--;

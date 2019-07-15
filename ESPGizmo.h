@@ -19,6 +19,7 @@ class ESPGizmo {
 public:
     ESPGizmo();
 
+    void suggestIP(IPAddress ipAddress);
     void beginSetup(const char *name, const char *version, const char *passkey);
     void endSetup();
 
@@ -64,6 +65,7 @@ public:
                          uint8_t willQos, bool willRetain);
 
 private:
+    IPAddress suggestedIP = IPAddress(10, 10, 10, 1);
     uint8_t macAddr[6];
 
     char name[MAX_NAME_SIZE];
