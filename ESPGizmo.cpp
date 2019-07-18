@@ -61,6 +61,10 @@ const char *ESPGizmo::getMAC() {
     return mac;
 }
 
+const IPAddress ESPGizmo::getIP() {
+    return apIP;
+};
+
 const char *ESPGizmo::getTopicPrefix() {
     return topicPrefix[0] != '\0' ? topicPrefix : hostname;
 }
@@ -203,7 +207,7 @@ bool ESPGizmo::publishBinarySensor(bool nv, bool ov, char *topic) {
 }
 
 void ESPGizmo::suggestIP(IPAddress ipAddress) {
-    suggestedIP = ipAddress;
+    apIP = ipAddress;
 }
 
 void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
@@ -547,7 +551,7 @@ void ESPGizmo::handleHotSpotDetect() {
         captiveCount++;
     } else if (captiveCount == 1) {
         char buf[2048];
-        snprintf(buf, 2047, WELCOME_HTML, suggestedIP.toString().c_str(), suggestedIP.toString().c_str());
+        snprintf(buf, 2047, WELCOME_HTML, apIP.toString().c_str(), apIP.toString().c_str());
         server->send(200, "text/html", buf);
         captiveCount++;
     } else {
@@ -586,7 +590,6 @@ void ESPGizmo::setupWiFi() {
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
 
-    IPAddress apIP = suggestedIP;
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
 

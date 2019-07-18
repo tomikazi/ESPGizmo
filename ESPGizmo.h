@@ -23,6 +23,7 @@ public:
     void beginSetup(const char *name, const char *version, const char *passkey);
     void endSetup();
 
+    const IPAddress getIP();
     const char *getName();
     const char *getHostname();
     const char *getTopicPrefix();
@@ -65,7 +66,7 @@ public:
                          uint8_t willQos, bool willRetain);
 
 private:
-    IPAddress suggestedIP = IPAddress(10, 10, 10, 1);
+    IPAddress apIP = IPAddress(10, 10, 10, 1);
     uint8_t macAddr[6];
 
     char name[MAX_NAME_SIZE];
