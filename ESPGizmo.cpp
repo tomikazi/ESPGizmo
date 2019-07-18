@@ -546,7 +546,9 @@ void ESPGizmo::handleHotSpotDetect() {
         server->send(200, "text/html", "<HTML><HEAD><TITLE>Captive</TITLE></HEAD><BODY>Captive</BODY></HTML>");
         captiveCount++;
     } else if (captiveCount == 1) {
-        server->send(200, "text/html", WELCOME_HTML);
+        char buf[2048];
+        snprintf(buf, 2047, WELCOME_HTML, suggestedIP.toString().c_str(), suggestedIP.toString().c_str());
+        server->send(200, "text/html", buf);
         captiveCount++;
     } else {
         server->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
