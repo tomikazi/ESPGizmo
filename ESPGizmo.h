@@ -19,6 +19,7 @@ class ESPGizmo {
 public:
     ESPGizmo();
 
+    void setNetworkConfig(const char *filename);
     void suggestIP(IPAddress ipAddress);
     void beginSetup(const char *name, const char *version, const char *passkey);
     void endSetup();
@@ -68,6 +69,7 @@ public:
 private:
     IPAddress apIP = IPAddress(10, 10, 10, 1);
     uint8_t macAddr[6];
+    const char *networkConfig = "cfg/wifi";
 
     char name[MAX_NAME_SIZE];
     char version[MAX_VERSION_SIZE];

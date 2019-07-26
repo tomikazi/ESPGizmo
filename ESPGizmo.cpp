@@ -10,8 +10,8 @@
 #define LED 2
 
 // WiFi connection attributes
-#define WIFI_CHANNEL        6
-#define MAX_CONNECTIONS     4
+#define WIFI_CHANNEL       11
+#define MAX_CONNECTIONS     6
 
 #define GIZMO_CONSOLE_TOPIC   "gizmo/console"
 #define GIZMO_CONTROL_TOPIC  "gizmo/control"
@@ -566,11 +566,19 @@ void ESPGizmo::handleNotFound() {
     captiveCount = 0;
 }
 
+void ESPGizmo::setNetworkConfig(const char *filename) {
+    networkConfig = filename;
+    Serial.printf("Switching WiFi configuration to %s...\n", networkConfig);
+    setupWiFi();
+}
+
 void ESPGizmo::setupWiFi() {
     WiFi.hostname(hostname);
+    ssid[0] = '\0';
 
     loadNetworkConfig();
-    if (strlen(ssid)) {
+    boolean isStation = strlen(ssid);
+    if (isStation) {
         Serial.printf("Attempting connection to %s\n", ssid);
         WiFi.begin(ssid, passkey);
     } else {
@@ -585,9 +593,12 @@ void ESPGizmo::setupWiFi() {
         strcpy(hostname, defaultHostname);
     }
 
+    uint8_t mode = 0;
+    wifi_softap_set_dhcps_offer_option(OFFER_ROUTER, &mode);
+
     snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
 
-    WiFi.mode(WIFI_AP_STA);
+    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
     WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
@@ -826,9 +837,10 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             afterConnection();
             led(false);
         }
+
+        ArduinoOTA.handle();
     }
     dnsServer.processNextRequest();
-    ArduinoOTA.handle();
     server->handleClient();
 
     if (updateTime && updateTime < millis()) {
@@ -872,7 +884,7 @@ char *trimWhiteSpace(char *str) {
 }
 
 void ESPGizmo::loadNetworkConfig() {
-    File f = SPIFFS.open(normalizeFile("cfg/wifi"), "r");
+    File f = SPIFFS.open(normalizeFile(networkConfig), "r");
     if (f) {
         int l = f.readBytesUntil('|', ssid, MAX_SSID_SIZE - 1);
         ssid[l] = '\0';

@@ -61,8 +61,8 @@ function menu() { let m = document.getElementById(\"menu\"); m.hidden = !m.hidde
     <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no\"/>\
     <style>\
-        body {background:#444;width:100%;font-family:Arial,Helvetica,Sans-Serif,serif;font-size:18px;}\
-        #main {width:100%;margin-top:96px;text-align:center;}\
+        body {background:#444;width:100%%;font-family:Arial,Helvetica,Sans-Serif,serif;font-size:18px;}\
+        #main {width:100%%;margin-top:96px;text-align:center;}\
         img {padding:0px;margin:0px;background:#444;}\
         a {text-decoration:none;}\
     </style>\
