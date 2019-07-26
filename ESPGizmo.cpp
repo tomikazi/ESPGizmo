@@ -569,17 +569,30 @@ void ESPGizmo::handleNotFound() {
 void ESPGizmo::setNetworkConfig(const char *filename) {
     networkConfig = filename;
     Serial.printf("Switching WiFi configuration to %s...\n", networkConfig);
+    WiFi.disconnect(true);
+    setupWiFi();
+}
+
+void ESPGizmo::setNoNetworkConfig() {
+    networkConfig = "";
+    Serial.printf("Switching WiFi configuration to AP only\n");
+    WiFi.disconnect(true);
     setupWiFi();
 }
 
 void ESPGizmo::setupWiFi() {
     WiFi.hostname(hostname);
+    WiFi.setAutoConnect(false);
     ssid[0] = '\0';
 
-    loadNetworkConfig();
+    if (strlen(networkConfig)) {
+        loadNetworkConfig();
+    }
+
     boolean isStation = strlen(ssid);
     if (isStation) {
         Serial.printf("Attempting connection to %s\n", ssid);
+        WiFi.persistent(false);
         WiFi.begin(ssid, passkey);
     } else {
         Serial.printf("No WiFi connection configured\n");

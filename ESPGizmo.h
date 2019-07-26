@@ -20,6 +20,7 @@ public:
     ESPGizmo();
 
     void setNetworkConfig(const char *filename);
+    void setNoNetworkConfig();
     void suggestIP(IPAddress ipAddress);
     void beginSetup(const char *name, const char *version, const char *passkey);
     void endSetup();
