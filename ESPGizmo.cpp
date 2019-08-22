@@ -186,12 +186,12 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
         if (!strcmp(value, "version")) {
             schedulePublish((char *) GIZMO_CONSOLE_TOPIC, announceMessage, false);
         } else if (!strncmp(value, "update ", 7) &&
-                   (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
+                   (strstr(hostname, value) || (strlen(topicPrefix) && strstr(topicPrefix, value)))) {
             scheduleUpdate();
         } else if (!strncmp(value, "fileUpdate ", 11) &&
-                   (strstr(value, hostname) || (strlen(topicPrefix) && strstr(value, topicPrefix)))) {
+                   (strstr(hostname, value) || (strlen(topicPrefix) && strstr(topicPrefix, value)))) {
             scheduleFileUpdate();
-        } else if (!strncmp(value, "restart ", 8) && strstr(value, hostname)) {
+        } else if (!strncmp(value, "restart ", 8) && strstr(hostname, value)) {
             scheduleRestart();
         }
     }
