@@ -611,8 +611,12 @@ void ESPGizmo::setupWiFi() {
 
     snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
 
+    // If we don't have an SSID configured to which to connect to,
+    // start as a visible access point otherwise, start as a hidden access point/station
     WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
-    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
+    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
+
+    Serial.printf("WiFi is %s\n", isStation ? "hidden" : "visible");
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
@@ -872,6 +876,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
 
     if (!wifiReady) {
         disconnected = true;
+        led(true);
     }
 
     return wifiReady && mqttReady;
