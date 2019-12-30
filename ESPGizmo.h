@@ -37,17 +37,17 @@ public:
     void setCallback(void (*callback)(char*, uint8_t*, unsigned int));
     void addTopic(const char *topic);
     void addTopic(const char *topic, const char *uniqueName);
-    void publish(char *topic, char *payload);
-    void publish(char *topic, char *payload, boolean retain);
-    void schedulePublish(char *topic, char *payload);
-    void schedulePublish(char *topic, char *payload, boolean retain);
+    void publish(const char *topic, char *payload);
+    void publish(const char *topic, char *payload, boolean retain);
+    void schedulePublish(const char *topic, char *payload);
+    void schedulePublish(const char *topic, char *payload, boolean retain);
 
-    void publish(char *topic, const char *payload);
-    void publish(char *topic, const char *payload, boolean retain);
-    void schedulePublish(char *topic, const char *payload);
-    void schedulePublish(char *topic, const char *payload, boolean retain);
+    void publish(const char *topic, const char *payload);
+    void publish(const char *topic, const char *payload, boolean retain);
+    void schedulePublish(const char *topic, const char *payload);
+    void schedulePublish(const char *topic, const char *payload, boolean retain);
 
-    bool publishBinarySensor(bool nv, bool ov, char *topic);
+    bool publishBinarySensor(bool nv, bool ov, const char *topic);
 
     ESP8266WebServer *httpServer();
     void setUpdateURL(const char *url);

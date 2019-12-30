@@ -31,7 +31,7 @@ static uint32_t restartTime = 0;
 static uint32_t updateTime = 0;
 static uint32_t fileUpdateTime = 0;
 
-static char *scheduledTopic = NULL;
+static const char *scheduledTopic = NULL;
 static char *scheduledPayload = NULL;
 static boolean scheduledRetain = false;
 
@@ -137,15 +137,15 @@ void ESPGizmo::addTopic(const char *topic, const char *uniqueName) {
     }
 }
 
-void ESPGizmo::publish(char *topic, char *payload) {
+void ESPGizmo::publish(const char *topic, char *payload) {
     publish(topic, payload, false);
 }
 
-void ESPGizmo::publish(char *topic, const char *payload) {
+void ESPGizmo::publish(const char *topic, const char *payload) {
     publish(topic, (char *) payload);
 }
 
-void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
+void ESPGizmo::publish(const char *topic, char *payload, boolean retain) {
     if (mqttConfigured && mqtt) {
         if (strstr(topic, "%s")) {
             char tt[MAX_TOPIC_SIZE];
@@ -159,25 +159,25 @@ void ESPGizmo::publish(char *topic, char *payload, boolean retain) {
     }
 }
 
-void ESPGizmo::publish(char *topic, const char *payload, boolean retain) {
+void ESPGizmo::publish(const char *topic, const char *payload, boolean retain) {
     publish(topic, (char *) payload, retain);
 }
 
-void ESPGizmo::schedulePublish(char *topic, char *payload, boolean retain) {
+void ESPGizmo::schedulePublish(const char *topic, char *payload, boolean retain) {
     scheduledRetain = retain;
     scheduledPayload = payload;
     scheduledTopic = topic;
 }
 
-void ESPGizmo::schedulePublish(char *topic, char *payload) {
+void ESPGizmo::schedulePublish(const char *topic, char *payload) {
     schedulePublish(topic, payload, false);
 }
 
-void ESPGizmo::schedulePublish(char *topic, const char *payload, boolean retain) {
+void ESPGizmo::schedulePublish(const char *topic, const char *payload, boolean retain) {
     schedulePublish(topic, (char *) payload, retain);
 }
 
-void ESPGizmo::schedulePublish(char *topic, const char *payload) {
+void ESPGizmo::schedulePublish(const char *topic, const char *payload) {
     schedulePublish(topic, payload, false);
 }
 
@@ -197,7 +197,7 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
     }
 }
 
-bool ESPGizmo::publishBinarySensor(bool nv, bool ov, char *topic) {
+bool ESPGizmo::publishBinarySensor(bool nv, bool ov, const char *topic) {
     if (nv && !ov) {
         publish(topic, "on", true);
     } else if (!nv && ov) {
