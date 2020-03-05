@@ -42,6 +42,9 @@ static char announceMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 DNSServer dnsServer;
 
+#define OFFLINE_TIMEOUT     15000
+static uint32_t offlineTime;
+
 ESPGizmo::ESPGizmo() {
 }
 
@@ -230,6 +233,7 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
 }
 
 void ESPGizmo::endSetup() {
+    offlineTime = strlen(getSSID()) ? millis() + OFFLINE_TIMEOUT : millis();
     server->begin();
     Serial.println("HTTP server started");
 }
@@ -249,6 +253,11 @@ void ESPGizmo::scheduleFileUpdate() {
     fileUpdateTime = millis() + 1500;
 }
 
+void ESPGizmo::handleRoot() {
+    File f = SPIFFS.open("/index.html", "r");
+    server->streamFile(f, "text/html");
+    f.close();
+}
 
 void ESPGizmo::handleNetworkScanPage() {
     server->setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -648,6 +657,9 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
     server->on("/hotspot-detect.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+
+    server->on("/", std::bind(&ESPGizmo::handleRoot, this));
+    server->serveStatic("/", SPIFFS, "/", "max-age=86400");
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -851,6 +863,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
 
         if (callAfterConnection && mqttReady && afterConnection) {
             callAfterConnection = false;
+            offlineTime = 0;
             afterConnection();
             led(false);
         }
@@ -877,6 +890,12 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     if (!wifiReady) {
         disconnected = true;
         led(true);
+    }
+
+    // If we're still not ready and the offline time grace period ran-out, run without WiFi.
+    if (!(wifiReady && mqttReady) && offlineTime && offlineTime < millis()) {
+        setNoNetworkConfig();
+        afterConnection();
     }
 
     return wifiReady && mqttReady;

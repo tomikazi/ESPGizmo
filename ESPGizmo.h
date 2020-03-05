@@ -115,6 +115,7 @@ private:
     void loadMQTTConfig();
     void saveMQTTConfig();
 
+    void handleRoot();
     void handleNetworkScanPage();
     void handleNetworkConfig();
     void handleMQTTPage();
