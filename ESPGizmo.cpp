@@ -24,6 +24,7 @@ static char topics[MAX_TOPIC_COUNT][MAX_TOPIC_SIZE];
 static int topicCount = 0;
 
 static boolean callAfterConnection = false;
+static boolean booted = false;
 static boolean disconnected = true;
 static boolean mqttConfigured = false;
 static uint32_t lastReconnectAttempt = 0;
@@ -196,6 +197,8 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
             scheduleFileUpdate();
         } else if (!strncmp(value, "restart ", 8) && strstr(hostname, value+8)) {
             scheduleRestart();
+        } else if (!strncmp(value, "debug=", 6) && strstr(hostname, value+8)) {
+            debugEnabled = value[6] == 'y';
         }
     }
 }
@@ -209,11 +212,20 @@ bool ESPGizmo::publishBinarySensor(bool nv, bool ov, const char *topic) {
     return nv;
 }
 
-void ESPGizmo::debug(const char *msg) {
-    char line[512];
-    line[0] = '\0';
-    snprintf(line, 511, "%s: %s", getHostname(), msg);
-    publish("gizmo/console", line);
+void ESPGizmo::debug(const char *fmt, ...) {
+    if (debugEnabled) {
+        va_list argList;
+        va_start(argList, fmt);
+        char dmsg[256];
+        dmsg[0] = '\0';
+        vsnprintf(dmsg, 255, fmt, argList);
+        va_end(argList);
+
+        char line[300];
+        line[0] = '\0';
+        snprintf(line, 299, "%s: %s", getHostname(), dmsg);
+        publish("gizmo/console", line);
+    }
 }
 
 void ESPGizmo::suggestIP(IPAddress ipAddress) {
@@ -819,12 +831,21 @@ boolean ESPGizmo::mqttReconnect() {
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
         // Once connected, publish an announcement and subscribe...
         mqtt->publish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
+        booted = true;
+        updateAnnounceMessage();
+
         mqtt->subscribe(GIZMO_CONTROL_TOPIC);
         for (int i = 0; i < topicCount; i++) {
             mqtt->subscribe(topics[i]);
         }
     }
     return mqtt->connected();
+}
+
+void ESPGizmo::updateAnnounceMessage() {
+    snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s) %s/%s %s",
+             hostname, version, WiFi.localIP().toString().c_str(), mac,
+             booted ? "reconnect" : "boot");
 }
 
 bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
@@ -837,9 +858,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             callAfterConnection = true;
             Serial.printf("Connected to %s with IP %s\n", ssid, WiFi.localIP().toString().c_str());
 
-            snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s) %s/%s",
-                     hostname, version, WiFi.localIP().toString().c_str(), mac);
-
+            updateAnnounceMessage();
             mqtt = new PubSubClient(mqttHost, mqttPort, wifiClient);
             mqtt->setCallback(mqttCallback);
 

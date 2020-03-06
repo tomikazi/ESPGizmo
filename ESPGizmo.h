@@ -67,7 +67,8 @@ public:
     void setMQTTLastWill(const char* willTopic, const char* willMessage,
                          uint8_t willQos, bool willRetain);
 
-    void debug(const char *msg);
+    void debug(const char *msg, ...);
+    boolean debugEnabled = false;
 
 private:
     IPAddress apIP = IPAddress(10, 10, 10, 1);
@@ -131,6 +132,7 @@ private:
     void handleNotFound();
     void startUpload();
     void handleUpload();
+    void updateAnnounceMessage();
 
     void restart();
     boolean mqttReconnect();
