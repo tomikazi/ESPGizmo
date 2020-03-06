@@ -67,6 +67,8 @@ public:
     void setMQTTLastWill(const char* willTopic, const char* willMessage,
                          uint8_t willQos, bool willRetain);
 
+    void debug(const char *msg);
+
 private:
     IPAddress apIP = IPAddress(10, 10, 10, 1);
     uint8_t macAddr[6];

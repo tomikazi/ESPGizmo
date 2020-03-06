@@ -209,6 +209,13 @@ bool ESPGizmo::publishBinarySensor(bool nv, bool ov, const char *topic) {
     return nv;
 }
 
+void ESPGizmo::debug(const char *msg) {
+    char line[512];
+    line[0] = '\0';
+    snprintf(line, 511, "%s: %s", getHostname(), msg);
+    publish("gizmo/console", line);
+}
+
 void ESPGizmo::suggestIP(IPAddress ipAddress) {
     apIP = ipAddress;
 }
