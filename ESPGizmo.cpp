@@ -657,9 +657,6 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
     server->on("/hotspot-detect.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
-
-    server->on("/", std::bind(&ESPGizmo::handleRoot, this));
-    server->serveStatic("/", SPIFFS, "/", "max-age=86400");
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -669,6 +666,9 @@ void ESPGizmo::setUpdateURL(const char *url) {
         server->on("/doupdate", std::bind(&ESPGizmo::handleDoUpdate, this));
         server->on("/dofileupdate", std::bind(&ESPGizmo::handleDoFileUpdate, this));
     }
+
+    server->on("/", std::bind(&ESPGizmo::handleRoot, this));
+    server->serveStatic("/", SPIFFS, "/", "max-age=86400");
 }
 
 void ESPGizmo::setupOTA() {
