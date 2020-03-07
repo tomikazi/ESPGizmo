@@ -347,6 +347,30 @@ void ESPGizmo::handleNetworkConfig() {
     scheduleRestart();
 }
 
+void ESPGizmo::handleEraseConfig() {
+    Serial.printf("Resetting configuration\n");
+
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/html", HTML_HEAD);
+    server->sendContent("Config Reset");
+    server->sendContent(HTML_TITLE_END);
+    server->sendContent(HTML_REDIRECT_START);
+    server->sendContent("/nets");
+    server->sendContent(HTML_REDIRECT_END);
+    server->sendContent(HTML_CSS_MENU);
+    server->sendContent(HTML_BODY);
+    server->sendContent("Config Reset");
+    server->sendContent(HTML_MENU);
+    server->sendContent("<p>Erasing configuration. Restarting...</p>");
+    server->sendContent(HTML_END);
+    server->sendContent("");
+
+    SPIFFS.remove("/cfg/wifi");
+    SPIFFS.remove("/cfg/mqtt");
+    WiFi.disconnect(true);
+    scheduleRestart();
+}
+
 void ESPGizmo::handleMQTTPage() {
     char port[8];
 
@@ -427,6 +451,7 @@ void ESPGizmo::handleUpdate() {
     server->sendContent("<p><form action=\"/doupdate\"><input type=\"submit\" value=\"Update\"></form>");
     server->sendContent("<p><form action=\"/dofileupdate\"><input type=\"submit\" value=\"Update Files\"></form>");
     server->sendContent("<p><form action=\"/reset\"><input type=\"submit\" value=\"Reset\"></form>");
+    server->sendContent("<p><form action=\"/erase\"><input type=\"submit\" value=\"Erase Config\"></form>");
     server->sendContent(HTML_END);
     server->sendContent("");
 }
@@ -675,6 +700,7 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
+    server->on("/erase", std::bind(&ESPGizmo::handleEraseConfig, this));
     server->on("/hotspot-detect.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
 }
 

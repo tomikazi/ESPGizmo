@@ -121,12 +121,14 @@ private:
     void handleRoot();
     void handleNetworkScanPage();
     void handleNetworkConfig();
+    void handleEraseConfig();
     void handleMQTTPage();
     void handleMQTTConfig();
     void handleFiles();
     void handleUpdate();
     void handleDoUpdate();
     void handleDoFileUpdate();
+    void handleErase();
     void handleReset();
     void handleHotSpotDetect();
     void handleNotFound();
