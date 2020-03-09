@@ -450,8 +450,8 @@ void ESPGizmo::handleUpdate() {
 
     server->sendContent("<p><form action=\"/doupdate\"><input type=\"submit\" value=\"Update\"></form>");
     server->sendContent("<p><form action=\"/dofileupdate\"><input type=\"submit\" value=\"Update Files\"></form>");
-    server->sendContent("<p><form action=\"/reset\"><input type=\"submit\" value=\"Reset\"></form>");
-    server->sendContent("<p><form action=\"/erase\"><input type=\"submit\" value=\"Erase Config\"></form>");
+    server->sendContent("<br><br><form action=\"/reset\"><input type=\"submit\" value=\"Reset\"></form>");
+    server->sendContent("<br><br><form action=\"javascript:if (confirm('This will erase custom configuration!')) { window.location.href = '/erase'; }\"><input type=\"submit\" value=\"Erase Config\"></form>");
     server->sendContent(HTML_END);
     server->sendContent("");
 }
