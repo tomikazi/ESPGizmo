@@ -51,6 +51,7 @@ public:
 
     ESP8266WebServer *httpServer();
     void setUpdateURL(const char *url);
+    void setUpdateURL(const char *url, void (*callback)());
 
     bool isNetworkAvailable(void (*afterConnection)());
 
@@ -110,6 +111,7 @@ private:
     void setupOTA();
     void setupHTTPServer();
 
+    void (*onUpdate)();
     int downloadAndSave(const char *url, const char *file);
 
     void loadNetworkConfig();
@@ -132,6 +134,7 @@ private:
     void handleReset();
     void handleHotSpotDetect();
     void handleNotFound();
+    void preUpload();
     void startUpload();
     void handleUpload();
     void updateAnnounceMessage();

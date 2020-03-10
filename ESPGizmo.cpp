@@ -555,12 +555,20 @@ void ESPGizmo::handleFiles() {
 static File uploadFile;
 static uint32_t uploadSize;
 
+void ESPGizmo::preUpload() {
+    if (onUpdate) {
+        onUpdate();
+    }
+    server->send(200, "text/plain", "");
+}
+
 void ESPGizmo::startUpload() {
     server->send(200, "text/plain", "");
 }
 
 void ESPGizmo::handleUpload() {
     static char name[64];
+
     HTTPUpload &upload = server->upload();
     snprintf(name, 63, "/%s", upload.filename.c_str());
     Serial.printf("Uploading %s... phase %d, total=%u, current=%u, name=%s, type=%s\n",
@@ -697,6 +705,7 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/netcfg", std::bind(&ESPGizmo::handleNetworkConfig, this));
     server->on("/mqtt", std::bind(&ESPGizmo::handleMQTTPage, this));
     server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
+    server->on("/uploadprep", std::bind(&ESPGizmo::preUpload, this));
     server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
@@ -705,6 +714,11 @@ void ESPGizmo::setupHTTPServer() {
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
+    setUpdateURL(url, NULL);
+}
+
+void ESPGizmo::setUpdateURL(const char *url, void (*callback)()) {
+    onUpdate = callback;
     updateUrl = (char *) url;
     if (strlen(updateUrl)) {
         server->on("/update", std::bind(&ESPGizmo::handleUpdate, this));
@@ -926,11 +940,17 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     server->handleClient();
 
     if (updateTime && updateTime < millis()) {
+        if (onUpdate) {
+            onUpdate();
+        }
         updateSoftware(updateUrl);
         updateTime = 0;
     }
 
     if (fileUpdateTime && fileUpdateTime < millis()) {
+        if (onUpdate) {
+            onUpdate();
+        }
         updateFiles(updateUrl);
         fileUpdateTime = 0;
     }
