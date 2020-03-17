@@ -4,6 +4,7 @@
 #include <PubSubClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
+#include <NTPClient.h>
 
 #define MAX_NAME_SIZE       32
 #define MAX_VERSION_SIZE    16
@@ -52,6 +53,10 @@ public:
     ESP8266WebServer *httpServer();
     void setUpdateURL(const char *url);
     void setUpdateURL(const char *url, void (*callback)());
+    void setupWebRoot();
+
+    void setupNTPClient();
+    NTPClient *timeClient();
 
     bool isNetworkAvailable(void (*afterConnection)());
 
@@ -101,8 +106,9 @@ private:
     bool fileUploadFailed = false;
 
     WiFiClient wifiClient;
-    PubSubClient *mqtt;
-    ESP8266WebServer *server;
+    PubSubClient *mqtt = NULL;
+    ESP8266WebServer *server = NULL;
+    NTPClient *ntpClient = NULL;
 
     char *updateUrl = NULL;
 

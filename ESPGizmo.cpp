@@ -46,6 +46,8 @@ DNSServer dnsServer;
 #define OFFLINE_TIMEOUT     15000
 static uint32_t offlineTime;
 
+WiFiUDP ntpUDP;
+
 ESPGizmo::ESPGizmo() {
 }
 
@@ -75,6 +77,10 @@ const char *ESPGizmo::getTopicPrefix() {
 
 ESP8266WebServer *ESPGizmo::httpServer() {
     return server;
+}
+
+NTPClient *ESPGizmo::timeClient() {
+    return ntpClient;
 }
 
 void ESPGizmo::led(boolean on) {
@@ -249,6 +255,10 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
     setupMQTT();
     setupOTA();
     setupHTTPServer();
+}
+
+void ESPGizmo::setupNTPClient() {
+    ntpClient = new NTPClient(ntpUDP, "pool.ntp.org", -9 * 3600);
 }
 
 void ESPGizmo::endSetup() {
@@ -725,7 +735,9 @@ void ESPGizmo::setUpdateURL(const char *url, void (*callback)()) {
         server->on("/doupdate", std::bind(&ESPGizmo::handleDoUpdate, this));
         server->on("/dofileupdate", std::bind(&ESPGizmo::handleDoFileUpdate, this));
     }
+}
 
+void ESPGizmo::setupWebRoot() {
     server->on("/", std::bind(&ESPGizmo::handleRoot, this));
     server->serveStatic("/", SPIFFS, "/", "max-age=86400");
 }
@@ -928,6 +940,9 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
         }
 
         if (callAfterConnection && mqttReady && afterConnection) {
+            if (ntpClient) {
+                ntpClient->begin();
+            }
             callAfterConnection = false;
             offlineTime = 0;
             afterConnection();
@@ -938,6 +953,10 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     }
     dnsServer.processNextRequest();
     server->handleClient();
+
+    if (ntpClient) {
+        ntpClient->update();
+    }
 
     if (updateTime && updateTime < millis()) {
         if (onUpdate) {
