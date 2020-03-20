@@ -258,7 +258,7 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
 }
 
 void ESPGizmo::setupNTPClient() {
-    ntpClient = new NTPClient(ntpUDP, "pool.ntp.org", -9 * 3600);
+    ntpClient = new NTPClient(ntpUDP, "pool.ntp.org", -7 * 3600);
 }
 
 void ESPGizmo::endSetup() {
