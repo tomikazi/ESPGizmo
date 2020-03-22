@@ -43,7 +43,7 @@ static char announceMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 DNSServer dnsServer;
 
-#define OFFLINE_TIMEOUT     15000
+#define OFFLINE_TIMEOUT     60000
 static uint32_t offlineTime;
 
 WiFiUDP ntpUDP;
