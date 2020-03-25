@@ -986,6 +986,8 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     // If we're still not ready and the offline time grace period ran-out, run without WiFi.
     if (!(wifiReady && mqttReady) && offlineTime && offlineTime < millis()) {
         setNoNetworkConfig();
+        callAfterConnection = false;
+        offlineTime = 0;
         afterConnection();
     }
 
