@@ -962,6 +962,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
         if (onUpdate) {
             onUpdate();
         }
+        updateFiles(updateUrl);
         updateSoftware(updateUrl);
         updateTime = 0;
     }
