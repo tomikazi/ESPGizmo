@@ -11,7 +11,7 @@
 
 // WiFi connection attributes
 #define WIFI_CHANNEL       11
-#define MAX_CONNECTIONS     6
+#define MAX_CONNECTIONS     8
 
 #define GIZMO_CONSOLE_TOPIC   "gizmo/console"
 #define GIZMO_CONTROL_TOPIC  "gizmo/control"
@@ -685,12 +685,12 @@ void ESPGizmo::setupWiFi() {
     // If we don't have an SSID configured to which to connect to,
     // start as a visible access point otherwise, start as a hidden access point/station
     WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
-    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
-
-    Serial.printf("WiFi is %s\n", isStation ? "hidden" : "visible");
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
+    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
+
+//    Serial.printf("WiFi is %s\n", isStation ? "hidden" : "visible");
 
     dnsServer.start(DNS_PORT, "*", apIP);
 
