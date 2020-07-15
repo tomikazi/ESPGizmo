@@ -39,9 +39,9 @@ static boolean scheduledRetain = false;
 #define MAX_ANNOUNCE_MESSAGE_SIZE   128
 static char announceMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
-#define MAX_WILL_TOPIC_SIZE     64
+#define MAX_WILL_TOPIC_SIZE     128
 static char defaultWillTopic[MAX_ANNOUNCE_MESSAGE_SIZE];
-#define MAX_WILL_MESSAGE_SIZE   64
+#define MAX_WILL_MESSAGE_SIZE   128
 static char defaultWillMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 #define DNS_PORT    53
@@ -688,7 +688,7 @@ void ESPGizmo::setupWiFi() {
     snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
 
     snprintf(defaultWillTopic, MAX_WILL_TOPIC_SIZE, "%s", GIZMO_CONSOLE_TOPIC);
-    snprintf(defaultWillMessage, MAX_WILL_MESSAGE_SIZE, "%s (%s) disconnected", hostname, version);
+    snprintf(defaultWillMessage, MAX_WILL_MESSAGE_SIZE, "%s disconnected ", hostname);
 
     // If we don't have an SSID configured to which to connect to,
     // start as a visible access point otherwise, start as a hidden access point/station
@@ -891,9 +891,11 @@ boolean ESPGizmo::mqttReconnect() {
     if (!willTopic || !willMessage) {
         willTopic = defaultWillTopic;
         willMessage = defaultWillMessage;
+        Serial.printf("dt=%s; dm=%s\n", willTopic, willMessage);
     }
 
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass, willTopic, willQos, willRetain, willMessage)) {
+//    if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
         // Once connected, publish an announcement and subscribe...
         mqtt->publish(GIZMO_CONSOLE_TOPIC, announceMessage, false);
         booted = true;
