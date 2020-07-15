@@ -99,9 +99,10 @@ private:
     void (*mqttCallback)(char*, uint8_t*, unsigned int);
     char topicPrefix[MAX_SSID_SIZE];
 
-    char *willTopic, *willMessage;
-    uint8_t willQos;
-    bool willRetain;
+    char *willTopic = NULL;
+    char *willMessage = NULL;
+    uint8_t willQos = 0;
+    bool willRetain = false;
     bool updatingFiles = false;
     bool fileUploadFailed = false;
 
