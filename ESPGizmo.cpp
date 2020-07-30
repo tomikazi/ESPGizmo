@@ -891,7 +891,7 @@ boolean ESPGizmo::mqttReconnect() {
     if (!willTopic || !willMessage) {
         willTopic = defaultWillTopic;
         willMessage = defaultWillMessage;
-        Serial.printf("dt=%s; dm=%s\n", willTopic, willMessage);
+//        Serial.printf("dt=%s; dm=%s\n", willTopic, willMessage);
     }
 
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass, willTopic, willQos, willRetain, willMessage)) {
