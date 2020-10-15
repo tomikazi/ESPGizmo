@@ -6,7 +6,7 @@
 #include <ESP8266HTTPClient.h>
 #include <NTPClient.h>
 
-#define MAX_NAME_SIZE       32
+#define MAX_NAME_SIZE       64
 #define MAX_VERSION_SIZE    16
 #define MAX_SSID_SIZE       32
 #define MAX_PASSKEY_SIZE    32
