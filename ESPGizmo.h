@@ -55,6 +55,9 @@ public:
     void setUpdateURL(const char *url, void (*callback)());
     void setupWebRoot();
 
+    void setupPinger();
+    void handlePinger();
+
     void setupNTPClient();
     NTPClient *timeClient();
 

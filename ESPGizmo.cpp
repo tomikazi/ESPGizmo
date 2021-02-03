@@ -6,6 +6,7 @@
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 #include <DNSServer.h>
+#include <Pinger.h>
 
 #define LED 2
 
@@ -52,6 +53,12 @@ DNSServer dnsServer;
 static uint32_t offlineTime;
 
 WiFiUDP ntpUDP;
+
+#define PING_FREQUENCY    60000
+#define PING_THRESHOLD    3*PING_FREQUENCY
+Pinger *pinger = NULL;
+static uint32_t lastPingAttempt = 0;
+static uint32_t lastPingSuccess = 0;
 
 ESPGizmo::ESPGizmo() {
 }
@@ -201,14 +208,14 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
         if (!strcmp(value, "version")) {
             schedulePublish((char *) GIZMO_CONSOLE_TOPIC, announceMessage, false);
         } else if (!strncmp(value, "update ", 7) &&
-                   (strstr(hostname, value+7) || (strlen(topicPrefix) && strstr(topicPrefix, value+7)))) {
+                   (strstr(hostname, value + 7) || (strlen(topicPrefix) && strstr(topicPrefix, value + 7)))) {
             scheduleUpdate();
         } else if (!strncmp(value, "fileUpdate ", 11) &&
-                   (strstr(hostname, value+11) || (strlen(topicPrefix) && strstr(topicPrefix, value+11)))) {
+                   (strstr(hostname, value + 11) || (strlen(topicPrefix) && strstr(topicPrefix, value + 11)))) {
             scheduleFileUpdate();
-        } else if (!strncmp(value, "restart ", 8) && strstr(hostname, value+8)) {
+        } else if (!strncmp(value, "restart ", 8) && strstr(hostname, value + 8)) {
             scheduleRestart();
-        } else if (!strncmp(value, "debug=", 6) && strstr(hostname, value+8)) {
+        } else if (!strncmp(value, "debug=", 6) && strstr(hostname, value + 8)) {
             debugEnabled = value[6] == 'y';
         }
     }
@@ -750,6 +757,27 @@ void ESPGizmo::setupWebRoot() {
     server->serveStatic("/", SPIFFS, "/", "max-age=86400");
 }
 
+void ESPGizmo::setupPinger() {
+    pinger = new Pinger();
+    pinger->OnReceive([](const PingerResponse &response) {
+        if (response.ReceivedResponse) {
+            lastPingSuccess = millis();
+        }
+        return false;
+    });
+}
+
+void ESPGizmo::handlePinger() {
+    if (pinger && lastPingSuccess + PING_THRESHOLD < millis()) {
+        scheduleRestart();
+    } else if (pinger && lastPingAttempt + PING_FREQUENCY < millis()) {
+        if (pinger->Ping(WiFi.gatewayIP()) == false) {
+            Serial.println("Unable to ping gateway");
+        }
+        lastPingAttempt = millis();
+    }
+}
+
 void ESPGizmo::setupOTA() {
     ArduinoOTA.setHostname(hostname);
     ArduinoOTA.onStart([]() {
@@ -965,6 +993,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
         }
 
         ArduinoOTA.handle();
+        handlePinger();
     }
     dnsServer.processNextRequest();
     server->handleClient();
