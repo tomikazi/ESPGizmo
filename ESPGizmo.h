@@ -149,6 +149,7 @@ private:
     void startUpload();
     void handleUpload();
     void updateAnnounceMessage();
+    void readCustomPasskey(const char *defaultPasskey);
 
     void restart();
     boolean mqttReconnect();
