@@ -129,6 +129,7 @@ private:
     void saveNetworkConfig();
 
     void loadMQTTConfig();
+    void savePasskey(const char *psk);
     void saveMQTTConfig();
 
     void handleRoot();
@@ -137,6 +138,7 @@ private:
     void handleEraseConfig();
     void handleMQTTPage();
     void handleMQTTConfig();
+    void handlePasskey();
     void handleFiles();
     void handleUpdate();
     void handleDoUpdate();

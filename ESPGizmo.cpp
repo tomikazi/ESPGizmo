@@ -469,6 +469,25 @@ void ESPGizmo::handleMQTTConfig() {
     scheduleRestart();
 }
 
+void ESPGizmo::handlePasskey() {
+    char psk[MAX_PASSKEY_SIZE];
+    strncpy(psk, server->arg("psk").c_str(), MAX_PASSKEY_SIZE - 1);
+    if (strlen(psk) < 8) {
+        Serial.printf("Passkey %s is too short\n", psk);
+        server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+        server->send(409, "text/plain", "too short");
+        return;
+    }
+
+    Serial.printf("Setting custom passkey to %s\n", psk);
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/plain", psk);
+
+    savePasskey(psk);
+    WiFi.disconnect(true);
+    scheduleRestart();
+}
+
 void ESPGizmo::handleUpdate() {
     server->setContentLength(CONTENT_LENGTH_UNKNOWN);
     server->send(200, "text/html", HTML_HEAD);
@@ -746,6 +765,7 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/netcfg", std::bind(&ESPGizmo::handleNetworkConfig, this));
     server->on("/mqtt", std::bind(&ESPGizmo::handleMQTTPage, this));
     server->on("/mqttcfg", std::bind(&ESPGizmo::handleMQTTConfig, this));
+    server->on("/passkey", std::bind(&ESPGizmo::handlePasskey, this));
     server->on("/uploadprep", std::bind(&ESPGizmo::preUpload, this));
     server->on("/upload", HTTP_POST, std::bind(&ESPGizmo::startUpload, this), std::bind(&ESPGizmo::handleUpload, this));
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
@@ -1124,6 +1144,14 @@ void ESPGizmo::saveMQTTConfig() {
     File f = SPIFFS.open("/cfg/mqtt", "w");
     if (f) {
         f.printf("%s|%d|%s|%s|%s|\n", mqttHost, mqttPort, mqttUser, mqttPass, topicPrefix);
+        f.close();
+    }
+}
+
+void ESPGizmo::savePasskey(const char *psk) {
+    File f = SPIFFS.open(CUSTOM_PASSKEY, "w");
+    if (f) {
+        f.printf("%s\n", psk);
         f.close();
     }
 }
