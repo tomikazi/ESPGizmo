@@ -23,6 +23,7 @@ public:
     void setNetworkConfig(const char *filename);
     void setNoNetworkConfig();
     void suggestIP(IPAddress ipAddress);
+    void alwaysOnline();
     void beginSetup(const char *name, const char *version, const char *passkey);
     void endSetup();
 
@@ -157,6 +158,9 @@ private:
     boolean mqttReconnect();
 
     void initToSaneValues();
+
+    void setupAlwaysOnline();
+    void setAlwaysOnline(bool on);
 };
 
 extern char *normalizeFile(const char *file);

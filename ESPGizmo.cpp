@@ -15,6 +15,7 @@
 #define MAX_CONNECTIONS     8
 
 #define CUSTOM_PASSKEY      "/psk"
+#define ALWAYS_ONLINE       "/online"
 
 #define GIZMO_CONSOLE_TOPIC   "gizmo/console"
 #define GIZMO_CONTROL_TOPIC  "gizmo/control"
@@ -53,6 +54,7 @@ DNSServer dnsServer;
 
 #define OFFLINE_TIMEOUT     60000
 static uint32_t offlineTime;
+static bool isAlwaysOnline = false;
 
 WiFiUDP ntpUDP;
 
@@ -217,6 +219,12 @@ void ESPGizmo::handleMQTTMessage(const char *topic, const char *value) {
             scheduleFileUpdate();
         } else if (!strncmp(value, "restart ", 8) && strstr(hostname, value + 8)) {
             scheduleRestart();
+        } else if (!strncmp(value, "reset ", 6) && strstr(hostname, value + 6)) {
+            scheduleRestart();
+        } else if (!strncmp(value, "online on ", 10) && strstr(hostname, value + 10)) {
+            setAlwaysOnline(true);
+        } else if (!strncmp(value, "online off ", 11) && strstr(hostname, value + 11)) {
+            setAlwaysOnline(false);
         } else if (!strncmp(value, "debug=", 6) && strstr(hostname, value + 8)) {
             debugEnabled = value[6] == 'y';
         }
@@ -252,6 +260,10 @@ void ESPGizmo::suggestIP(IPAddress ipAddress) {
     apIP = ipAddress;
 }
 
+void ESPGizmo::alwaysOnline() {
+    isAlwaysOnline = true;
+}
+
 void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_passkey) {
     Serial.begin(115200);
     pinMode(LED, OUTPUT);
@@ -271,6 +283,7 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
     setupMQTT();
     setupOTA();
     setupHTTPServer();
+    setupAlwaysOnline();
 }
 
 void ESPGizmo::readCustomPasskey(const char *defaultPasskey) {
@@ -793,6 +806,14 @@ void ESPGizmo::setupWebRoot() {
     server->serveStatic("/", SPIFFS, "/", "max-age=86400");
 }
 
+void ESPGizmo::setupAlwaysOnline() {
+    isAlwaysOnline = SPIFFS.exists(ALWAYS_ONLINE);
+    if (isAlwaysOnline) {
+        Serial.printf("Always expected online...");
+        setupPinger();
+    }
+}
+
 void ESPGizmo::setupPinger() {
     pinger = new Pinger();
     pinger->OnReceive([](const PingerResponse &response) {
@@ -1066,10 +1087,14 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
 
     // If we're still not ready and the offline time grace period ran-out, run without WiFi.
     if (!(wifiReady && mqttReady) && offlineTime && offlineTime < millis()) {
-        setNoNetworkConfig();
-        callAfterConnection = false;
-        offlineTime = 0;
-        afterConnection();
+        if (!isAlwaysOnline) {
+            setNoNetworkConfig();
+            callAfterConnection = false;
+            offlineTime = 0;
+            afterConnection();
+        } else {
+            restart();
+        }
     }
 
     return wifiReady && mqttReady;
@@ -1153,6 +1178,19 @@ void ESPGizmo::savePasskey(const char *psk) {
     if (f) {
         f.printf("%s\n", psk);
         f.close();
+    }
+}
+
+void ESPGizmo::setAlwaysOnline(bool on) {
+    isAlwaysOnline = on;
+    if (on) {
+        File f = SPIFFS.open(ALWAYS_ONLINE, "w");
+        if (f) {
+            f.printf("true\n");
+            f.close();
+        }
+    } else {
+        SPIFFS.remove(ALWAYS_ONLINE);
     }
 }
 
