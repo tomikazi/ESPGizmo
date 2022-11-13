@@ -344,21 +344,32 @@ void ESPGizmo::handleNetworkScanPage() {
     server->sendContent(
             "\" size=\"30\"><h3>Network</h3><select id=\"netlist\" onchange='document.getElementById(\"net\").value = document.getElementById(\"netlist\").value'>");
 
+    char fssid[64];
+    fssid[0] = '\0';
+
+    char cssid[64];
     int n = WiFi.scanNetworks();
     for (int i = 0; i < n; i++) {
-        server->sendContent("<option value=\"");
-        server->sendContent(WiFi.SSID(i).c_str());
-        if (!strcmp(WiFi.SSID(i).c_str(), ssid)) {
-            server->sendContent("\" selected>");
-        } else {
-            server->sendContent("\">");
+        strncpy(cssid, WiFi.SSID(i).c_str(), 63);
+        int len = strlen(cssid);
+        if (len > 0) {
+            if (strlen(fssid) == 0) {
+                strncpy(fssid, cssid, 63);
+            }
+            server->sendContent("<option value=\"");
+            server->sendContent(cssid);
+            if (!strcmp(cssid, ssid)) {
+                server->sendContent("\" selected>");
+            } else {
+                server->sendContent("\">");
+            }
+            server->sendContent(cssid);
+            server->sendContent("</option>");
         }
-        server->sendContent(WiFi.SSID(i).c_str());
-        server->sendContent("</option>");
     }
 
     server->sendContent("</select><p><input type=\"text\" id=\"net\" name=\"net\" value=\"");
-    if (strlen(ssid)) server->sendContent(ssid);
+    server->sendContent(strlen(ssid) ? ssid : fssid);
     server->sendContent("\" size=\"30\"><h3>Password</h3><input type=\"password\" name=\"pass\" value=\"");
     if (strlen(passkey)) server->sendContent(passkey);
     server->sendContent("\" size=\"30\"><p><h3>IP Address</h3>");
