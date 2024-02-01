@@ -79,7 +79,6 @@ public:
 
     void debug(const char *msg, ...);
     boolean debugEnabled = false;
-    boolean useMulticast = false;
 
 private:
     IPAddress apIP = IPAddress(10, 10, 10, 1);

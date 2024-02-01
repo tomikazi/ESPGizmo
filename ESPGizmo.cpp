@@ -8,8 +8,6 @@
 #include <DNSServer.h>
 #include <Pinger.h>
 
-#include <user_interface.h>
-
 #define LED 2
 
 // WiFi connection attributes
@@ -761,10 +759,6 @@ void ESPGizmo::setupWiFi() {
     // If we don't have an SSID configured to which to connect to,
     // start as a visible access point otherwise, start as a hidden access point/station
     WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
-
-    if (useMulticast) {
-        wifi_set_sleep_type(NONE_SLEEP_T);
-    }
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
