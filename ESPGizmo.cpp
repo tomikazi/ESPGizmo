@@ -52,7 +52,7 @@ static char defaultWillMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 DNSServer dnsServer;
 
-#define OFFLINE_TIMEOUT     60000
+#define OFFLINE_TIMEOUT     30000
 static uint32_t offlineTime;
 static bool isAlwaysOnline = false;
 
@@ -758,18 +758,24 @@ void ESPGizmo::setupWiFi() {
 
     // If we don't have an SSID configured to which to connect to,
     // start as a visible access point otherwise, start as a hidden access point/station
-    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
+//    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
+    WiFi.mode(WIFI_AP_STA);
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
-    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, false, MAX_CONNECTIONS);
-
-//    Serial.printf("WiFi is %s\n", isStation ? "hidden" : "visible");
+    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
 
     dnsServer.start(DNS_PORT, "*", apIP);
 
-    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d\n", hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
+    IPAddress sIP = WiFi.softAPIP();
+    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d and IP %d.%d.%d.%d\n", hostname,
+                  apIP[0], apIP[1], apIP[2], apIP[3], sIP[0], sIP[1], sIP[2], sIP[3]);
     delay(100);
+
+    if (isStation) {
+        Serial.printf("WiFi is hidden\n");
+        WiFi.softAPdisconnect(true);
+    }
 }
 
 void ESPGizmo::setupMQTT() {
