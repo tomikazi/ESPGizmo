@@ -758,8 +758,8 @@ void ESPGizmo::setupWiFi() {
 
     // If we don't have an SSID configured to which to connect to,
     // start as a visible access point otherwise, start as a hidden access point/station
-//    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
-    WiFi.mode(WIFI_AP_STA);
+    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
+//    WiFi.mode(WIFI_AP_STA);
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
@@ -767,14 +767,12 @@ void ESPGizmo::setupWiFi() {
 
     dnsServer.start(DNS_PORT, "*", apIP);
 
-    IPAddress sIP = WiFi.softAPIP();
-    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d and IP %d.%d.%d.%d\n", hostname,
-                  apIP[0], apIP[1], apIP[2], apIP[3], sIP[0], sIP[1], sIP[2], sIP[3]);
+    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d\n", hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
     delay(100);
 
     if (isStation) {
         Serial.printf("WiFi is hidden\n");
-        WiFi.softAPdisconnect(true);
+        WiFi.softAPdisconnect(false);
     }
 }
 
