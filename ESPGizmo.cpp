@@ -30,6 +30,7 @@ static int topicCount = 0;
 static boolean callAfterConnection = false;
 static boolean booted = false;
 static boolean disconnected = true;
+static boolean wifiConfigured = false;
 static boolean mqttConfigured = false;
 static uint32_t lastReconnectAttempt = 0;
 static uint32_t restartTime = 0;
@@ -280,6 +281,10 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
     readCustomPasskey(_passkey);
 
     setupWiFi();
+
+    // Latch the WiFi as configured on first setup after booting.
+    wifiConfigured = strlen(ssid);
+
     setupMQTT();
     setupOTA();
     setupHTTPServer();
@@ -1097,7 +1102,7 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
 
     if (!wifiReady) {
         disconnected = true;
-        led(true);
+        led(wifiConfigured); // Turn on the LED only if WiFi is marked as configured.
     }
 
     // If we're still not ready and the offline time grace period ran-out, run without WiFi.
