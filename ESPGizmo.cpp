@@ -6,7 +6,6 @@
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 #include <DNSServer.h>
-#include <ESP8266WiFiGratuitous.h>
 
 #define LED 2
 
@@ -751,7 +750,9 @@ void ESPGizmo::setNoNetworkConfig() {
 }
 
 void ESPGizmo::setupWiFi() {
-    WiFi.persistent(false);
+    // Leak-fix baseline WiFi bring-up (pre inbound-stability experiments):
+    // begin → mode/softAP → softAPdisconnect when stationed.
+    WiFi.hostname(hostname);
     WiFi.setAutoConnect(false);
     ssid[0] = '\0';
 
@@ -760,10 +761,13 @@ void ESPGizmo::setupWiFi() {
     }
 
     boolean isStation = strlen(ssid);
-
-    // Mode before begin. Keep AP_STA for station devices — pure WIFI_STA regressed
-    // inbound ICMP/HTTP to 100% loss on this network while MQTT still worked.
-    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
+    if (isStation) {
+        Serial.printf("Attempting connection to %s\n", ssid);
+        WiFi.persistent(false);
+        WiFi.begin(ssid, passkey);
+    } else {
+        Serial.printf("No WiFi connection configured\n");
+    }
 
     WiFi.softAPmacAddress(macAddr);
     sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -772,32 +776,27 @@ void ESPGizmo::setupWiFi() {
     if (strlen(hostname) < 2) {
         strcpy(hostname, defaultHostname);
     }
-    WiFi.hostname(hostname);
-
-    IPAddress netMask = IPAddress(255, 255, 255, 0);
-    WiFi.softAPConfig(apIP, apIP, netMask);
-    // Hidden AP when also connecting as station; visible AP for captive portal.
-    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
-    WiFi.softAPDhcpServer().setRouter(false);
 
     snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
     snprintf(defaultWillTopic, MAX_WILL_TOPIC_SIZE, "%s", GIZMO_CONSOLE_TOPIC);
     snprintf(defaultWillMessage, MAX_WILL_MESSAGE_SIZE, "%s disconnected ", hostname);
 
+    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
+
+    IPAddress netMask = IPAddress(255, 255, 255, 0);
+    WiFi.softAPConfig(apIP, apIP, netMask);
+    WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
+    WiFi.softAPDhcpServer().setRouter(false);
+
+    dnsServer.start(DNS_PORT, "*", apIP);
+
+    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d\n",
+                  hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
+    delay(100);
+
     if (isStation) {
-        Serial.printf("Attempting connection to %s\n", ssid);
-        WiFi.setSleepMode(WIFI_NONE_SLEEP);
-        WiFi.begin(ssid, passkey);
-        delay(100);
+        Serial.printf("WiFi is hidden\n");
         WiFi.softAPdisconnect(false);
-        WiFi.setSleepMode(WIFI_NONE_SLEEP);
-        Serial.printf("WiFi AP_STA %s sleep=%d\n", hostname, (int)WiFi.getSleepMode());
-    } else {
-        Serial.printf("No WiFi connection configured\n");
-        dnsServer.start(DNS_PORT, "*", apIP);
-        Serial.printf("WiFi AP %s started with gateway IP %d.%d.%d.%d\n",
-                      hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
-        delay(100);
     }
 }
 
@@ -1055,13 +1054,6 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             callAfterConnection = true;
             Serial.printf("Connected to %s with IP %s\n", ssid, WiFi.localIP().toString().c_str());
 
-            // Do NOT call WiFi.mode() here — it resets the netif and can leave ARP
-            // working while inbound ICMP/TCP to already-bound listeners die.
-            // MQTT still "works" because PubSubClient opens a fresh outbound socket.
-            WiFi.setSleepMode(WIFI_NONE_SLEEP);
-            experimental::ESP8266WiFiGratuitous::stationKeepAliveSetIntervalMs(5000);
-            Serial.printf("WiFi sleep mode=%d\n", (int)WiFi.getSleepMode());
-
             updateAnnounceMessage();
             if (!mqtt) {
                 mqtt = new PubSubClient(wifiClient);
@@ -1069,12 +1061,6 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             mqtt->setServer(mqttHost, mqttPort);
             mqtt->setCallback(mqttCallback);
             mqtt->setSocketTimeout(2);
-
-            // Re-bind HTTP after STA has an IP; begin() before association is unreliable.
-            if (server) {
-                server->stop();
-                server->begin();
-            }
 
             ArduinoOTA.begin();
             if (MDNS.begin(hostname)) {
