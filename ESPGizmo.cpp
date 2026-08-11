@@ -1,12 +1,12 @@
 #include <ESPGizmo.h>
 #include <ESPGizmoHTML.h>
-#include <FS.h>
+#include <LittleFS.h>
 
 #include <ESP8266mDNS.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
 #include <DNSServer.h>
-#include <Pinger.h>
+#include <ESP8266WiFiGratuitous.h>
 
 #define LED 2
 
@@ -58,12 +58,6 @@ static uint32_t offlineTime;
 static bool isAlwaysOnline = false;
 
 WiFiUDP ntpUDP;
-
-#define PING_FREQUENCY    60000
-#define PING_THRESHOLD    3*PING_FREQUENCY
-Pinger *pinger = NULL;
-static uint32_t lastPingAttempt = 0;
-static uint32_t lastPingSuccess = 0;
 
 ESPGizmo::ESPGizmo() {
 }
@@ -269,7 +263,36 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
     Serial.begin(115200);
     pinMode(LED, OUTPUT);
     led(true);
-    SPIFFS.begin();
+    LittleFS.setConfig(LittleFSConfig().setAutoFormat(false));
+    delay(1500); // allow Serial Monitor to connect before boot diagnostics
+    bool mounted = LittleFS.begin();
+    if (!mounted) {
+        Serial.println("LittleFS mount failed; formatting filesystem...");
+        Serial.printf("Expected partition: addr=0x%X size=%u page=%u block=%u\n",
+                      FS_PHYS_ADDR, FS_PHYS_SIZE, FS_PHYS_PAGE, FS_PHYS_BLOCK);
+        Serial.printf("Flash chip size: %u bytes\n", ESP.getFlashChipRealSize());
+        if (LittleFS.format() && LittleFS.begin()) {
+            mounted = true;
+            Serial.println("LittleFS formatted and mounted (empty - use Update Files or USB upload)");
+        } else {
+            Serial.println("LittleFS format/remount failed (check Flash Size matches board setting)");
+        }
+    }
+    if (mounted) {
+        FSInfo info;
+        if (LittleFS.info(info)) {
+            Serial.printf("LittleFS mounted: %u/%u bytes used\n", info.usedBytes, info.totalBytes);
+        }
+        Dir dir = LittleFS.openDir("/");
+        int fileCount = 0;
+        while (dir.next()) {
+            Serial.printf("  %s (%u)\n", dir.fileName().c_str(), dir.fileSize());
+            fileCount++;
+        }
+        if (fileCount == 0) {
+            Serial.println("  (LittleFS empty - use Update Files or USB upload)");
+        }
+    }
 
     initToSaneValues();
 
@@ -292,7 +315,7 @@ void ESPGizmo::beginSetup(const char *_name, const char *_version, const char *_
 }
 
 void ESPGizmo::readCustomPasskey(const char *defaultPasskey) {
-    File f = SPIFFS.open(CUSTOM_PASSKEY, "r");
+    File f = LittleFS.open(CUSTOM_PASSKEY, "r");
     if (f) {
         int l = f.readBytesUntil('\n', passkeyLocal, MAX_PASSKEY_SIZE - 1);
         passkeyLocal[l] = '\0';
@@ -329,7 +352,7 @@ void ESPGizmo::scheduleFileUpdate() {
 }
 
 void ESPGizmo::handleRoot() {
-    File f = SPIFFS.open("/index.html", "r");
+    File f = LittleFS.open("/index.html", "r");
     server->streamFile(f, "text/html");
     f.close();
 }
@@ -432,8 +455,8 @@ void ESPGizmo::handleEraseConfig() {
     server->sendContent(HTML_END);
     server->sendContent("");
 
-    SPIFFS.remove("/cfg/wifi");
-    SPIFFS.remove("/cfg/mqtt");
+    LittleFS.remove("/cfg/wifi");
+    LittleFS.remove("/cfg/mqtt");
     WiFi.disconnect(true);
     scheduleRestart();
 }
@@ -601,7 +624,7 @@ void ESPGizmo::handleReset() {
 }
 
 void listDir(ESP8266WebServer *server, const char *path) {
-    Dir dir = SPIFFS.openDir(path);
+    Dir dir = LittleFS.openDir(path);
     while (dir.next()) {
         char line[128];
         char name[48];
@@ -663,7 +686,7 @@ void ESPGizmo::handleUpload() {
 
     if (upload.status == UPLOAD_FILE_START) {
         Serial.printf("Starting upload for %s\n", name);
-        uploadFile = SPIFFS.open(name, "w");
+        uploadFile = LittleFS.open(name, "w");
         if (!uploadFile) {
             Serial.printf("Upload failed to open destination file\n");
         }
@@ -728,7 +751,7 @@ void ESPGizmo::setNoNetworkConfig() {
 }
 
 void ESPGizmo::setupWiFi() {
-    WiFi.hostname(hostname);
+    WiFi.persistent(false);
     WiFi.setAutoConnect(false);
     ssid[0] = '\0';
 
@@ -737,13 +760,10 @@ void ESPGizmo::setupWiFi() {
     }
 
     boolean isStation = strlen(ssid);
-    if (isStation) {
-        Serial.printf("Attempting connection to %s\n", ssid);
-        WiFi.persistent(false);
-        WiFi.begin(ssid, passkey);
-    } else {
-        Serial.printf("No WiFi connection configured\n");
-    }
+
+    // Mode before begin. Keep AP_STA for station devices — pure WIFI_STA regressed
+    // inbound ICMP/HTTP to 100% loss on this network while MQTT still worked.
+    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
 
     WiFi.softAPmacAddress(macAddr);
     sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -752,32 +772,32 @@ void ESPGizmo::setupWiFi() {
     if (strlen(hostname) < 2) {
         strcpy(hostname, defaultHostname);
     }
-
-    uint8_t mode = 0;
-    wifi_softap_set_dhcps_offer_option(OFFER_ROUTER, &mode);
-
-    snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
-
-    snprintf(defaultWillTopic, MAX_WILL_TOPIC_SIZE, "%s", GIZMO_CONSOLE_TOPIC);
-    snprintf(defaultWillMessage, MAX_WILL_MESSAGE_SIZE, "%s disconnected ", hostname);
-
-    // If we don't have an SSID configured to which to connect to,
-    // start as a visible access point otherwise, start as a hidden access point/station
-    WiFi.mode(isStation ? WIFI_AP_STA : WIFI_AP);
-//    WiFi.mode(WIFI_AP_STA);
+    WiFi.hostname(hostname);
 
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
+    // Hidden AP when also connecting as station; visible AP for captive portal.
     WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
+    WiFi.softAPDhcpServer().setRouter(false);
 
-    dnsServer.start(DNS_PORT, "*", apIP);
-
-    Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d\n", hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
-    delay(100);
+    snprintf(announceMessage, MAX_ANNOUNCE_MESSAGE_SIZE, "%s (%s)", hostname, version);
+    snprintf(defaultWillTopic, MAX_WILL_TOPIC_SIZE, "%s", GIZMO_CONSOLE_TOPIC);
+    snprintf(defaultWillMessage, MAX_WILL_MESSAGE_SIZE, "%s disconnected ", hostname);
 
     if (isStation) {
-        Serial.printf("WiFi is hidden\n");
+        Serial.printf("Attempting connection to %s\n", ssid);
+        WiFi.setSleepMode(WIFI_NONE_SLEEP);
+        WiFi.begin(ssid, passkey);
+        delay(100);
         WiFi.softAPdisconnect(false);
+        WiFi.setSleepMode(WIFI_NONE_SLEEP);
+        Serial.printf("WiFi AP_STA %s sleep=%d\n", hostname, (int)WiFi.getSleepMode());
+    } else {
+        Serial.printf("No WiFi connection configured\n");
+        dnsServer.start(DNS_PORT, "*", apIP);
+        Serial.printf("WiFi AP %s started with gateway IP %d.%d.%d.%d\n",
+                      hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
+        delay(100);
     }
 }
 
@@ -823,35 +843,16 @@ void ESPGizmo::setUpdateURL(const char *url, void (*callback)()) {
 
 void ESPGizmo::setupWebRoot() {
     server->on("/", std::bind(&ESPGizmo::handleRoot, this));
-    server->serveStatic("/", SPIFFS, "/", "max-age=86400");
+    server->serveStatic("/", LittleFS, "/", "max-age=86400");
 }
 
 void ESPGizmo::setupAlwaysOnline() {
-    isAlwaysOnline = SPIFFS.exists(ALWAYS_ONLINE);
+    isAlwaysOnline = LittleFS.exists(ALWAYS_ONLINE);
     if (isAlwaysOnline) {
-        Serial.printf("Always expected online...");
-        setupPinger();
-    }
-}
-
-void ESPGizmo::setupPinger() {
-    pinger = new Pinger();
-    pinger->OnReceive([](const PingerResponse &response) {
-        if (response.ReceivedResponse) {
-            lastPingSuccess = millis();
-        }
-        return false;
-    });
-}
-
-void ESPGizmo::handlePinger() {
-    if (pinger && lastPingSuccess + PING_THRESHOLD < millis()) {
-        scheduleRestart();
-    } else if (pinger && lastPingAttempt + PING_FREQUENCY < millis()) {
-        if (pinger->Ping(WiFi.gatewayIP()) == false) {
-            Serial.println("Unable to ping gateway");
-        }
-        lastPingAttempt = millis();
+        // Restart is handled by the offline grace period in isNetworkAvailable().
+        // Do not install a raw ICMP pinger: ESP8266-ping's raw PCB interferes with
+        // inbound echo replies, so the appliance can do MQTT but not answer ping.
+        Serial.printf("Always expected online...\n");
     }
 }
 
@@ -878,7 +879,8 @@ void ESPGizmo::setupOTA() {
 
 int ESPGizmo::updateSoftware(const char *url) {
     Serial.printf("Updating software from %s; current version %s\n", url, version);
-    t_httpUpdate_return ret = ESPhttpUpdate.update(url, version);
+    WiFiClient client;
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, url, version);
     switch (ret) {
         case HTTP_UPDATE_FAILED:
             Serial.println("Software update failed.");
@@ -897,7 +899,7 @@ int ESPGizmo::updateSoftware(const char *url) {
 bool isUpTodate(const char *file, const char *etag) {
     char efn[48], et[32];
     snprintf(efn, 47, "/etags%s", file);
-    File f = SPIFFS.open(efn, "r");
+    File f = LittleFS.open(efn, "r");
     if (f) {
         int l = f.readBytesUntil('\n', et, 31);
         et[l] = '\0';
@@ -910,7 +912,7 @@ bool isUpTodate(const char *file, const char *etag) {
 void saveEtag(const char *file, const char *etag) {
     char efn[48];
     snprintf(efn, 47, "/etags%s", file);
-    File f = SPIFFS.open(efn, "w");
+    File f = LittleFS.open(efn, "w");
     if (f) {
         f.printf("%s\n", etag);
         f.close();
@@ -922,44 +924,62 @@ int ESPGizmo::downloadAndSave(const char *url, const char *file) {
     snprintf(xurl, 255, "%s.data%s", url, file);
     Serial.printf("Starting download of %s...\n", file);
 
+    WiFiClient client;
     HTTPClient httpClient;
-    httpClient.begin(xurl);
+    httpClient.setTimeout(20000);
+    httpClient.begin(client, xurl);
 
     const char *headerKeys[] = {"Content-Length", "ETag"};
     httpClient.collectHeaders(headerKeys, 2);
 
     int code = httpClient.GET();
     if (code != HTTP_CODE_OK) {
-        Serial.printf("Unable to download %s\n", xurl);
+        Serial.printf("Unable to download %s (HTTP %d)\n", xurl, code);
+        httpClient.end();
         return 0;
     }
 
-    if (!isUpTodate(file, httpClient.header("ETag").c_str())) {
-        int length = httpClient.header("Content-Length").toInt();
-        int downloaded = 0;
-        WiFiClient *stream = httpClient.getStreamPtr();
-        if (stream) {
-            File f = SPIFFS.open(file, "w");
-            if (f) {
-                Serial.printf("Downloading %d bytes of %s ... ", length, file);
-                uint8_t buf[1024];
-                size_t rl;
-                while ((rl = stream->read(buf, 1024)) > 0) {
-                    f.write(buf, rl);
-                    downloaded += rl;
-                    delay(20);
-                    yield();
-                }
-                f.close();
-                Serial.printf("%d bytes\n", downloaded);
-                if (length == downloaded) {
-                    saveEtag(file, httpClient.header("ETag").c_str());
-                }
-            }
-        }
+    String etag = httpClient.header("ETag");
+    if (isUpTodate(file, etag.c_str())) {
+        Serial.printf("%s is up to date\n", file);
         httpClient.end();
-        delay(100);
-        return length == downloaded;
+        return 1;
+    }
+
+    File f = LittleFS.open(file, "w");
+    if (!f) {
+        Serial.printf("Unable to open %s for writing\n", file);
+        httpClient.end();
+        return 0;
+    }
+
+    int length = httpClient.getSize();
+    Serial.printf("Downloading %d bytes of %s ... ", length, file);
+
+    // writeToStream waits for the full body; raw stream->read() returns 0 on
+    // empty TCP buffers and was truncating larger files (e.g. jquery.js).
+    int downloaded = httpClient.writeToStream(&f);
+    f.close();
+    httpClient.end();
+
+    if (downloaded < 0) {
+        Serial.printf("failed (error %d)\n", downloaded);
+        LittleFS.remove(file);
+        return 0;
+    }
+
+    Serial.printf("%d bytes\n", downloaded);
+    if (length > 0 && downloaded != length) {
+        Serial.printf("Incomplete download of %s (%d/%d)\n", file, downloaded, length);
+        LittleFS.remove(file);
+        return 0;
+    }
+
+    if (etag.length()) {
+        if (!LittleFS.exists("/etags")) {
+            LittleFS.mkdir("/etags");
+        }
+        saveEtag(file, etag.c_str());
     }
     return 1;
 }
@@ -967,7 +987,7 @@ int ESPGizmo::downloadAndSave(const char *url, const char *file) {
 int ESPGizmo::updateFiles(const char *url) {
     updatingFiles = true;
     fileUploadFailed = !downloadAndSave(url, "/catalog");
-    File cat = SPIFFS.open("/catalog", "r");
+    File cat = LittleFS.open("/catalog", "r");
     if (cat && !fileUploadFailed) {
         char file[32];
         int l;
@@ -993,12 +1013,16 @@ int ESPGizmo::updateFiles(const char *url) {
 boolean ESPGizmo::mqttReconnect() {
     Serial.printf("Attempting connection to MQTT server %s as %s/%s\n",
                   mqttHost, mqttUser, mqttPass);
+    Serial.flush();
     if (!willTopic || !willMessage) {
         willTopic = defaultWillTopic;
         willMessage = defaultWillMessage;
 //        Serial.printf("dt=%s; dm=%s\n", willTopic, willMessage);
     }
 
+    mqtt->setSocketTimeout(2);
+    wifiClient.setTimeout(3000);
+    yield();
     if (mqtt->connect(defaultHostname, mqttUser, mqttPass, willTopic, willQos, willRetain, willMessage)) {
 //    if (mqtt->connect(defaultHostname, mqttUser, mqttPass)) {
         // Once connected, publish an announcement and subscribe...
@@ -1023,6 +1047,7 @@ void ESPGizmo::updateAnnounceMessage() {
 bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     boolean wifiReady = WiFi.status() == WL_CONNECTED;
     boolean mqttReady = (mqttConfigured && mqtt && mqtt->connected()) || !mqttConfigured;
+    boolean networkReady = wifiReady && mqttReady;
 
     if (wifiReady) {
         if (disconnected) {
@@ -1030,9 +1055,26 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
             callAfterConnection = true;
             Serial.printf("Connected to %s with IP %s\n", ssid, WiFi.localIP().toString().c_str());
 
+            // Do NOT call WiFi.mode() here — it resets the netif and can leave ARP
+            // working while inbound ICMP/TCP to already-bound listeners die.
+            // MQTT still "works" because PubSubClient opens a fresh outbound socket.
+            WiFi.setSleepMode(WIFI_NONE_SLEEP);
+            experimental::ESP8266WiFiGratuitous::stationKeepAliveSetIntervalMs(5000);
+            Serial.printf("WiFi sleep mode=%d\n", (int)WiFi.getSleepMode());
+
             updateAnnounceMessage();
-            mqtt = new PubSubClient(mqttHost, mqttPort, wifiClient);
+            if (!mqtt) {
+                mqtt = new PubSubClient(wifiClient);
+            }
+            mqtt->setServer(mqttHost, mqttPort);
             mqtt->setCallback(mqttCallback);
+            mqtt->setSocketTimeout(2);
+
+            // Re-bind HTTP after STA has an IP; begin() before association is unreliable.
+            if (server) {
+                server->stop();
+                server->begin();
+            }
 
             ArduinoOTA.begin();
             if (MDNS.begin(hostname)) {
@@ -1064,13 +1106,11 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
                 ntpClient->begin();
             }
             callAfterConnection = false;
-            offlineTime = 0;
             afterConnection();
             led(false);
         }
 
         ArduinoOTA.handle();
-        handlePinger();
     }
     dnsServer.processNextRequest();
     server->handleClient();
@@ -1101,23 +1141,35 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
     }
 
     if (!wifiReady) {
+        if (!disconnected && mqtt) {
+            mqtt->disconnect();
+        }
         disconnected = true;
         led(wifiConfigured); // Turn on the LED only if WiFi is marked as configured.
     }
 
+    if (networkReady) {
+        offlineTime = 0;
+    } else if (strlen(ssid) && !offlineTime) {
+        // Re-arm after a later WiFi/MQTT loss; endSetup arms the initial boot grace.
+        offlineTime = millis() + OFFLINE_TIMEOUT;
+        Serial.printf("Network not ready; offline grace %d ms\n", OFFLINE_TIMEOUT);
+    }
+
     // If we're still not ready and the offline time grace period ran-out, run without WiFi.
-    if (!(wifiReady && mqttReady) && offlineTime && offlineTime < millis()) {
+    if (!networkReady && offlineTime && offlineTime < millis()) {
         if (!isAlwaysOnline) {
             setNoNetworkConfig();
             callAfterConnection = false;
             offlineTime = 0;
             afterConnection();
         } else {
+            Serial.println("Always-online grace expired; restarting");
             restart();
         }
     }
 
-    return wifiReady && mqttReady;
+    return networkReady;
 }
 
 char *trimWhiteSpace(char *str) {
@@ -1140,7 +1192,7 @@ char *trimWhiteSpace(char *str) {
 }
 
 void ESPGizmo::loadNetworkConfig() {
-    File f = SPIFFS.open(normalizeFile(networkConfig), "r");
+    File f = LittleFS.open(normalizeFile(networkConfig), "r");
     if (f) {
         int l = f.readBytesUntil('|', ssid, MAX_SSID_SIZE - 1);
         ssid[l] = '\0';
@@ -1150,11 +1202,13 @@ void ESPGizmo::loadNetworkConfig() {
         hostname[l] = '\0';
         trimWhiteSpace(hostname);
         f.close();
+    } else {
+        Serial.printf("Could not open %s\n", normalizeFile(networkConfig));
     }
 }
 
 void ESPGizmo::saveNetworkConfig() {
-    File f = SPIFFS.open("/cfg/wifi", "w");
+    File f = LittleFS.open("/cfg/wifi", "w");
     if (f) {
         f.printf("%s|%s|%s|\n", ssid, passkey, hostname);
         f.close();
@@ -1167,7 +1221,7 @@ void ESPGizmo::setMQTTLastWill(const char *willTopic, const char *willMessage,
 }
 
 void ESPGizmo::loadMQTTConfig() {
-    File f = SPIFFS.open(normalizeFile("cfg/mqtt"), "r");
+    File f = LittleFS.open(normalizeFile("cfg/mqtt"), "r");
     if (f) {
         int l = f.readBytesUntil('|', mqttHost, MAX_MQTT_HOST_SIZE - 1);
         char port[8];
@@ -1186,7 +1240,7 @@ void ESPGizmo::loadMQTTConfig() {
 }
 
 void ESPGizmo::saveMQTTConfig() {
-    File f = SPIFFS.open("/cfg/mqtt", "w");
+    File f = LittleFS.open("/cfg/mqtt", "w");
     if (f) {
         f.printf("%s|%d|%s|%s|%s|\n", mqttHost, mqttPort, mqttUser, mqttPass, topicPrefix);
         f.close();
@@ -1194,7 +1248,7 @@ void ESPGizmo::saveMQTTConfig() {
 }
 
 void ESPGizmo::savePasskey(const char *psk) {
-    File f = SPIFFS.open(CUSTOM_PASSKEY, "w");
+    File f = LittleFS.open(CUSTOM_PASSKEY, "w");
     if (f) {
         f.printf("%s\n", psk);
         f.close();
@@ -1204,13 +1258,13 @@ void ESPGizmo::savePasskey(const char *psk) {
 void ESPGizmo::setAlwaysOnline(bool on) {
     isAlwaysOnline = on;
     if (on) {
-        File f = SPIFFS.open(ALWAYS_ONLINE, "w");
+        File f = LittleFS.open(ALWAYS_ONLINE, "w");
         if (f) {
             f.printf("true\n");
             f.close();
         }
     } else {
-        SPIFFS.remove(ALWAYS_ONLINE);
+        LittleFS.remove(ALWAYS_ONLINE);
     }
 }
 
@@ -1221,9 +1275,9 @@ char *normalizeFile(const char *file) {
         return (char *) file;
     }
     snprintf(normalized, 32, "/%s", file);
-    if (SPIFFS.exists(file)) {
+    if (LittleFS.exists(file)) {
         Serial.printf("Normalizing %s\n", file);
-        SPIFFS.rename(file, normalized);
+        LittleFS.rename(file, normalized);
     }
     return normalized;
 }
