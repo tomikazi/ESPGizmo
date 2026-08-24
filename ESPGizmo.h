@@ -52,6 +52,7 @@ public:
     bool publishBinarySensor(bool nv, bool ov, const char *topic);
 
     ESP8266WebServer *httpServer();
+    void sendCaptivePortal();
     void setUpdateURL(const char *url);
     void setUpdateURL(const char *url, void (*callback)());
     void setupWebRoot();
@@ -145,6 +146,8 @@ private:
     void handleReset();
     void handleHotSpotDetect();
     void handleNotFound();
+    void handleCaptiveApi();
+    bool redirectToPortal();
     void preUpload();
     void startUpload();
     void handleUpload();

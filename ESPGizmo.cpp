@@ -5,7 +5,8 @@
 #include <ESP8266mDNS.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
-#include <DNSServer.h>
+#include <WiFiUdp.h>
+#include <LwipDhcpServer.h>
 
 #define LED 2
 
@@ -50,7 +51,117 @@ static char defaultWillMessage[MAX_ANNOUNCE_MESSAGE_SIZE];
 
 #define DNS_PORT    53
 
-DNSServer dnsServer;
+// Wildcard DNS that still answers EDNS queries. Core DNSServer returns FormError
+// when ARCount != 0, so iOS/Android never HTTP-probe the portal.
+static WiFiUDP captiveDns;
+static uint8_t captiveDnsIp[4] = {10, 10, 10, 1};
+static bool captiveDnsActive = false;
+static WiFiServer captiveTls(443);
+
+static bool isSoftApPortal() {
+    return WiFi.getMode() == WIFI_AP;
+}
+
+static void addCaptivePortalDhcpOption(const DhcpServer &, DhcpServer::OptionsBuffer &options) {
+    char url[56];
+    snprintf(url, sizeof(url), "http://%u.%u.%u.%u/.well-known/captive-portal",
+             captiveDnsIp[0], captiveDnsIp[1], captiveDnsIp[2], captiveDnsIp[3]);
+    options.add(114, url, strlen(url));
+}
+
+static void startCaptiveDns(IPAddress ip) {
+    captiveDnsIp[0] = ip[0];
+    captiveDnsIp[1] = ip[1];
+    captiveDnsIp[2] = ip[2];
+    captiveDnsIp[3] = ip[3];
+    captiveDns.stop();
+    captiveDnsActive = captiveDns.begin(DNS_PORT) == 1;
+    captiveTls.stop();
+    captiveTls.begin();
+    Serial.printf("Captive DNS %s\n", captiveDnsActive ? "started" : "FAILED");
+}
+
+static void stopCaptiveDns() {
+    captiveDns.stop();
+    captiveDnsActive = false;
+    captiveTls.stop();
+}
+
+// Fail HTTPS probes quickly (TLS alert + FIN). A TCP RST looked like a dead
+// network and broke join; a black-hole :443 waits ~60s before HTTP fallback.
+static void processCaptiveTls() {
+    if (!captiveDnsActive) {
+        return;
+    }
+    static const uint8_t kTlsFatal[] = { 0x15, 0x03, 0x01, 0x00, 0x02, 0x02, 0x28 };
+    for (int n = 0; n < 4; n++) {
+        WiFiClient c = captiveTls.accept();
+        if (!c) {
+            return;
+        }
+        while (c.available()) {
+            c.read();
+        }
+        c.write(kTlsFatal, sizeof(kTlsFatal));
+        c.flush();
+        c.stop();
+    }
+}
+
+static void processCaptiveDns() {
+    if (!captiveDnsActive) {
+        return;
+    }
+    for (int n = 0; n < 8; n++) {
+        int len = captiveDns.parsePacket();
+        if (len < 12) {
+            return;
+        }
+        uint8_t buf[512];
+        if (len > (int) sizeof(buf)) {
+            len = sizeof(buf);
+        }
+        len = captiveDns.read(buf, len);
+        if (len < 12 || (buf[2] & 0x80)) {
+            continue;
+        }
+        int pos = 12;
+        while (pos < len && buf[pos] != 0) {
+            int label = buf[pos];
+            if (label > 63 || pos + 1 + label >= len) {
+                break;
+            }
+            pos += 1 + label;
+        }
+        pos += 5;
+        if (pos > len) {
+            continue;
+        }
+        uint16_t qtype = (buf[pos - 4] << 8) | buf[pos - 3];
+        int qlen = pos;
+        buf[2] = (uint8_t) (0x84 | (buf[2] & 0x01));
+        buf[3] = 0x80;
+        buf[6] = buf[7] = buf[8] = buf[9] = buf[10] = buf[11] = 0;
+        int outLen = qlen;
+        if ((qtype == 1 || qtype == 255) && qlen + 16 <= (int) sizeof(buf)) {
+            buf[7] = 1;
+            uint8_t *a = buf + qlen;
+            *a++ = 0xC0; *a++ = 0x0C;
+            *a++ = 0x00; *a++ = 0x01;
+            *a++ = 0x00; *a++ = 0x01;
+            *a++ = 0x00; *a++ = 0x00; *a++ = 0x00; *a++ = 0x00;
+            *a++ = 0x00; *a++ = 0x04;
+            *a++ = captiveDnsIp[0];
+            *a++ = captiveDnsIp[1];
+            *a++ = captiveDnsIp[2];
+            *a++ = captiveDnsIp[3];
+            outLen = qlen + 16;
+        }
+        captiveDns.beginPacket(captiveDns.remoteIP(), captiveDns.remotePort());
+        captiveDns.write(buf, outLen);
+        captiveDns.endPacket();
+    }
+}
 
 #define OFFLINE_TIMEOUT     30000
 static uint32_t offlineTime;
@@ -711,28 +822,70 @@ void ESPGizmo::restart() {
 }
 
 
-int captiveCount = 0;
+bool ESPGizmo::redirectToPortal() {
+    if (!isSoftApPortal()) {
+        return false;
+    }
+    String ip = apIP.toString();
+    String host = server->hostHeader();
+    int colon = host.indexOf(':');
+    if (colon > 0) {
+        host = host.substring(0, colon);
+    }
+    if (host.length() && host != ip) {
+        server->sendHeader("Location", String("http://") + ip + "/", true);
+        server->sendHeader("Cache-Control", "no-store");
+        server->send(302, "text/plain", "");
+        return true;
+    }
+    return false;
+}
+
+void ESPGizmo::sendCaptivePortal() {
+    if (!isSoftApPortal()) {
+        return;
+    }
+    if (redirectToPortal()) {
+        return;
+    }
+    String ip = apIP.toString();
+    char buf[2048];
+    snprintf(buf, sizeof(buf) - 1, WELCOME_HTML, ip.c_str(), ip.c_str(), ip.c_str(), ip.c_str());
+    server->sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    server->send(200, "text/html", buf);
+}
+
+void ESPGizmo::handleCaptiveApi() {
+    if (!isSoftApPortal()) {
+        server->send(404, "text/plain", "Not found");
+        return;
+    }
+    String ip = apIP.toString();
+    String json = String("{\"captive\":true,\"user-portal-url\":\"http://") + ip +
+                  "/hotspot-detect.html\"}";
+    server->sendHeader("Cache-Control", "no-store");
+    server->send(200, "application/captive+json", json);
+}
 
 void ESPGizmo::handleHotSpotDetect() {
-    Serial.printf("hotSpotDetect [%d, %s]\n", captiveCount, server->uri().c_str());
-    if (captiveCount == 0) {
-        server->send(200, "text/html", "<HTML><HEAD><TITLE>Captive</TITLE></HEAD><BODY>Captive</BODY></HTML>");
-        captiveCount++;
-    } else if (captiveCount == 1) {
-        char buf[2048];
-        snprintf(buf, 2047, WELCOME_HTML, apIP.toString().c_str(), apIP.toString().c_str());
-        server->send(200, "text/html", buf);
-        captiveCount++;
-    } else {
-        server->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
-        captiveCount = 0;
+    if (!isSoftApPortal()) {
+        server->send(404, "text/plain", "Not found");
+        return;
     }
+    Serial.printf("hotSpotDetect [%s]\n", server->uri().c_str());
+    if (redirectToPortal()) {
+        return;
+    }
+    sendCaptivePortal();
 }
 
 void ESPGizmo::handleNotFound() {
-    Serial.printf("notFound [%d, %s]\n", captiveCount, server->uri().c_str());
-    handleNetworkScanPage();
-    captiveCount = 0;
+    if (!isSoftApPortal()) {
+        server->send(404, "text/plain", "Not found");
+        return;
+    }
+    Serial.printf("notFound [%s]\n", server->uri().c_str());
+    sendCaptivePortal();
 }
 
 void ESPGizmo::setNetworkConfig(const char *filename) {
@@ -786,9 +939,7 @@ void ESPGizmo::setupWiFi() {
     IPAddress netMask = IPAddress(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMask);
     WiFi.softAP(hostname, passkeyLocal, WIFI_CHANNEL, isStation, MAX_CONNECTIONS);
-    WiFi.softAPDhcpServer().setRouter(false);
-
-    dnsServer.start(DNS_PORT, "*", apIP);
+    WiFi.softAPDhcpServer().setRouter(true);
 
     Serial.printf("WiFi %s started with gateway IP %d.%d.%d.%d\n",
                   hostname, apIP[0], apIP[1], apIP[2], apIP[3]);
@@ -796,7 +947,11 @@ void ESPGizmo::setupWiFi() {
 
     if (isStation) {
         Serial.printf("WiFi is hidden\n");
+        stopCaptiveDns();
         WiFi.softAPdisconnect(false);
+    } else {
+        startCaptiveDns(apIP);
+        WiFi.softAPDhcpServer().onSendOptions(addCaptivePortalDhcpOption);
     }
 }
 
@@ -823,7 +978,13 @@ void ESPGizmo::setupHTTPServer() {
     server->on("/reset", std::bind(&ESPGizmo::handleReset, this));
     server->on("/files", std::bind(&ESPGizmo::handleFiles, this));
     server->on("/erase", std::bind(&ESPGizmo::handleEraseConfig, this));
+    server->on("/.well-known/captive-portal", std::bind(&ESPGizmo::handleCaptiveApi, this));
     server->on("/hotspot-detect.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+    server->on("/library/test/success.html", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+    server->on("/generate_204", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+    server->on("/gen_204", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+    server->on("/connecttest.txt", std::bind(&ESPGizmo::handleHotSpotDetect, this));
+    server->onNotFound(std::bind(&ESPGizmo::handleNotFound, this));
 }
 
 void ESPGizmo::setUpdateURL(const char *url) {
@@ -1098,7 +1259,8 @@ bool ESPGizmo::isNetworkAvailable(void (*afterConnection)()) {
 
         ArduinoOTA.handle();
     }
-    dnsServer.processNextRequest();
+    processCaptiveDns();
+    processCaptiveTls();
     server->handleClient();
 
     if (ntpClient) {

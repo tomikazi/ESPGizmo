@@ -69,8 +69,8 @@ function menu() { let m = document.getElementById(\"menu\"); m.hidden = !m.hidde
 </head>\
 <body>\
     <div id=\"main\">\
-        <a href=\"http://%s/\"><img src=\"splash.png\"></a><p><br>\
-        <a href=\"http://%s/nets\"><img src=\"gears.png\"></a><p>\
+        <a href=\"http://%s/index.html\"><img src=\"http://%s/splash.png\"></a><p><br>\
+        <a href=\"http://%s/nets\"><img src=\"http://%s/gears.png\"></a><p>\
     </div>\
 </body>\
 </html>"
