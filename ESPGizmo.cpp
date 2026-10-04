@@ -357,6 +357,7 @@ void ESPGizmo::debug(const char *fmt, ...) {
         char line[300];
         line[0] = '\0';
         snprintf(line, 299, "%s: %s", getHostname(), dmsg);
+        Serial.println(line);
         publish("gizmo/console", line);
     }
 }
@@ -736,12 +737,22 @@ void ESPGizmo::handleReset() {
 void listDir(ESP8266WebServer *server, const char *path) {
     Dir dir = LittleFS.openDir(path);
     while (dir.next()) {
-        char line[128];
-        char name[48];
-        name[0] = '\0';
-        strncat(name, dir.fileName().c_str(), 47);
-        Serial.printf("%s\t%d\n", name, dir.fileSize());
-        snprintf(line, 127, "%-32s %8d<br>", name, dir.fileSize());
+        String entry = dir.fileName();
+        if (!entry.length() || entry == "." || entry == "..")
+            continue;
+        char full[96];
+        if (!path[0] || (path[0] == '/' && path[1] == '\0'))
+            snprintf(full, sizeof(full), "/%s", entry.c_str());
+        else
+            snprintf(full, sizeof(full), "%s/%s", path, entry.c_str());
+        if (dir.isDirectory()) {
+            listDir(server, full);
+            continue;
+        }
+        char line[180];
+        Serial.printf("%s\t%u\n", full, (unsigned)dir.fileSize());
+        snprintf(line, sizeof(line), "<a href=\"%s\">%s</a> %8u<br>",
+                 full, full, (unsigned)dir.fileSize());
         server->sendContent(line);
     }
 }
@@ -1003,7 +1014,7 @@ void ESPGizmo::setUpdateURL(const char *url, void (*callback)()) {
 
 void ESPGizmo::setupWebRoot() {
     server->on("/", std::bind(&ESPGizmo::handleRoot, this));
-    server->serveStatic("/", LittleFS, "/", "max-age=86400");
+    server->serveStatic("/", LittleFS, "/", "no-cache");
 }
 
 void ESPGizmo::setupAlwaysOnline() {
